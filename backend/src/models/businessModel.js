@@ -1,0 +1,333 @@
+'use strict';
+
+/**
+ * src/models/businessModel.js
+ *
+ * BUSINESS MODEL — PostgreSQL queries organized by intent.
+ * Each method accepts a businessId and returns rows from the relevant table.
+ *
+ * ADD NEW INTENTS: add a new method here and register it in businessInfoService.js.
+ */
+
+const db = require('../config/database');
+
+const BusinessModel = {
+  /**
+   * Returns just the business name — used for the welcome message on join.
+   * @param {number} businessId
+   */
+  async getName(businessId) {
+    const result = await db.query(
+      'SELECT name FROM businesses WHERE id = $1',
+      [businessId]
+    );
+    return result.rows[0]?.name || null;
+  },
+
+  /**
+   * Intent: horarios
+   * Returns all weekly schedule rows for the business.
+   * @param {number} businessId
+   */
+  async getHorarios(businessId) {
+    const result = await db.query(
+      `SELECT
+         day_of_week,
+         open_time,
+         close_time,
+         is_closed
+       FROM business_hours
+       WHERE business_id = $1
+       ORDER BY day_of_week ASC`,
+      [businessId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Intent: productos
+   * Returns all available products with stock info for the business.
+   * @param {number} businessId
+   */
+  async getProductos(businessId) {
+    const result = await db.query(
+      `SELECT
+         p.id,
+         p.name,
+         p.description,
+         p.price,
+         p.is_available,
+         c.name AS category,
+         pi.stock_quantity
+       FROM products p
+       LEFT JOIN product_inventory pi ON p.id = pi.product_id
+       LEFT JOIN categories         c  ON p.category_id = c.id
+       WHERE p.business_id = $1
+         AND p.is_available = TRUE
+       ORDER BY p.name ASC`,
+      [businessId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Intent: precios
+   * Returns product names and prices for the business.
+   * @param {number} businessId
+   */
+  async getPrecios(businessId) {
+    const result = await db.query(
+      `SELECT
+         name,
+         price
+       FROM products
+       WHERE business_id = $1
+         AND is_available = TRUE
+       ORDER BY price ASC`,
+      [businessId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Intent: promociones
+   * Returns active (non-expired) promotions for the business.
+   * @param {number} businessId
+   */
+  async getPromociones(businessId) {
+    const result = await db.query(
+      `SELECT
+         title,
+         description,
+         discount_type,
+         discount_value,
+         start_date,
+         end_date
+       FROM promotions
+       WHERE business_id = $1
+         AND end_date >= CURRENT_DATE
+       ORDER BY end_date ASC`,
+      [businessId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Returns the schedule row for a specific day of the week.
+   * @param {number} businessId
+   * @param {number} dayOfWeek   0 (Sunday) – 6 (Saturday)
+   */
+  async getHorariosByDay(businessId, dayOfWeek) {
+    const result = await db.query(
+      `SELECT
+         day_of_week,
+         open_time,
+         close_time,
+         is_closed
+       FROM business_hours
+       WHERE business_id = $1
+         AND day_of_week = $2`,
+      [businessId, dayOfWeek]
+    );
+    return result.rows[0] ?? null;
+  },
+
+  /**
+   * Returns distinct category names available for a business.
+   * @param {number} businessId
+   */
+  async getCategories(businessId) {
+    const result = await db.query(
+      `SELECT DISTINCT c.name AS category
+       FROM products p
+       JOIN categories c ON p.category_id = c.id
+       WHERE p.business_id = $1
+         AND p.is_available = TRUE
+       ORDER BY c.name ASC`,
+      [businessId]
+    );
+    return result.rows.map((r) => r.category);
+  },
+
+  /**
+   * Returns available products filtered by category name, with pagination.
+   * @param {number} businessId
+   * @param {string} categoryName
+   * @param {number} limit
+   * @param {number} offset
+   */
+  async getProductosByCategory(businessId, categoryName, limit = 15, offset = 0) {
+    const result = await db.query(
+      `SELECT
+         p.id,
+         p.name,
+         p.description,
+         p.price,
+         p.is_available,
+         c.name AS category,
+         pi.stock_quantity
+       FROM products p
+       LEFT JOIN product_inventory pi ON p.id = pi.product_id
+       LEFT JOIN categories         c  ON p.category_id = c.id
+       WHERE p.business_id = $1
+         AND c.name ILIKE $2
+         AND p.is_available = TRUE
+       ORDER BY p.name ASC
+       LIMIT $3 OFFSET $4`,
+      [businessId, categoryName, limit, offset]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Counts available products in a category.
+   * @param {number} businessId
+   * @param {string} categoryName
+   */
+  async countProductosByCategory(businessId, categoryName) {
+    const result = await db.query(
+      `SELECT COUNT(*) AS total
+       FROM products p
+       JOIN categories c ON p.category_id = c.id
+       WHERE p.business_id = $1
+         AND c.name ILIKE $2
+         AND p.is_available = TRUE`,
+      [businessId, categoryName]
+    );
+    return parseInt(result.rows[0]?.total ?? '0', 10);
+  },
+
+  /**
+   * Intent: ubicacion
+   * Returns general business location info.
+   * @param {number} businessId
+   */
+  async getUbicacion(businessId) {
+    const result = await db.query(
+      `SELECT
+         name,
+         description,
+         city,
+         webpage_link
+       FROM businesses
+       WHERE id = $1`,
+      [businessId]
+    );
+    return result.rows[0] || null;
+  },
+
+  /**
+   * Intent: comprar
+   * Returns business contact/location info for purchase guidance.
+   * @param {number} businessId
+   */
+  async getComprarInfo(businessId) {
+    const result = await db.query(
+      `SELECT
+         name,
+         description,
+         city,
+         webpage_link,
+         phone,
+         email
+       FROM businesses
+       WHERE id = $1`,
+      [businessId]
+    );
+    return result.rows[0] || null;
+  },
+
+  /**
+   * Intent: contacto
+   * Returns phone, email and webpage_link for the business.
+   * @param {number} businessId
+   */
+  async getContactoInfo(businessId) {
+    const result = await db.query(
+      `SELECT
+         name,
+         phone,
+         email,
+         webpage_link
+       FROM businesses
+       WHERE id = $1`,
+      [businessId]
+    );
+    return result.rows[0] || null;
+  },
+
+  /**
+   * Returns key/value attributes for an array of product IDs.
+   * Result is grouped by product_id: { [productId]: [{ key, value }, ...] }
+   * @param {number[]} productIds
+   * @returns {Promise<Record<number, {key:string,value:string}[]>>}
+   */
+  async getProductAttributes(productIds) {
+    if (!productIds || productIds.length === 0) return {};
+    const placeholders = productIds.map((_, i) => `$${i + 1}`).join(', ');
+    const result = await db.query(
+      `SELECT product_id, key, value
+       FROM product_attributes
+       WHERE product_id IN (${placeholders})
+       ORDER BY key ASC`,
+      productIds
+    );
+    const map = {};
+    for (const row of result.rows) {
+      if (!map[row.product_id]) map[row.product_id] = [];
+      map[row.product_id].push({ key: row.key, value: row.value });
+    }
+    return map;
+  },
+
+  /**
+   * Intent: servicios
+   * Returns all services offered by a business.
+   * @param {number} businessId
+   * @returns {Promise<{id,name,description,price}[]>}
+   */
+  async getServices(businessId) {
+    const result = await db.query(
+      `SELECT id, name, description, price
+       FROM business_services
+       WHERE business_id = $1
+       ORDER BY name ASC`,
+      [businessId]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Searches business services by name keyword.
+   * @param {number} businessId
+   * @param {string} name  Partial name to match (ILIKE).
+   * @returns {Promise<{id,name,description,price}[]>}
+   */
+  async getServiceByName(businessId, name) {
+    const result = await db.query(
+      `SELECT id, name, description, price
+       FROM business_services
+       WHERE business_id = $1
+         AND name ILIKE $2
+       ORDER BY name ASC
+       LIMIT 5`,
+      [businessId, `%${name}%`]
+    );
+    return result.rows;
+  },
+
+  /**
+   * Returns all registered businesses (id, name, type, city).
+   * Used by the frontend BusinessSelector to populate the selection screen.
+   */
+  async getAllBusinesses() {
+    const result = await db.query(
+      `SELECT id, name, category, city
+       FROM businesses
+       ORDER BY id ASC`
+    );
+    return result.rows;
+  },
+};
+
+module.exports = BusinessModel;
