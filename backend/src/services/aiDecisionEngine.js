@@ -60,8 +60,8 @@ function shouldUseAI(normalizedText, intentResult, entityResult, context) {
   // "que me recomienda de postres?" detects "postres" as entity but the
   // question itself requires AI reasoning, not a catalog dump.
 
-  // Recommendation requests
-  const RECOMMEND_RE = /\b(?:recomiend[ao](?:s|me|n)?|recomendacion|sugier[eo]|sugerencia|que\s+me\s+recomienda[sn]?|que\s+(?:es|esta)\s+bueno|mejor\s+opcion|popular|favorito)\b/;
+  // Recommendation requests (includes infinitive "recomendar" and modal "puedes/puede recomendar")
+  const RECOMMEND_RE = /\b(?:recomendar|recomiend[ao](?:s|me|n)?|recomendacion|sugier[eo]|sugerencia|que\s+me\s+recomienda[sn]?|que\s+(?:es|esta)\s+bueno|mejor\s+opcion|popular|favorito|(?:puedes?|puede|pueden|podr[ií]as?)\s+recomendar)\b/;
   if (RECOMMEND_RE.test(normalizedText)) {
     return { routing: 'ai', reason: 'recommendation request', aiCategory: 'recommendation' };
   }

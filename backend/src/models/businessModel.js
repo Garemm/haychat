@@ -25,6 +25,22 @@ const BusinessModel = {
   },
 
   /**
+   * Returns the full business profile used to build AI (Ollama) system prompts.
+   * Includes name, category (giro), description, city, email, phone, webpage_link.
+   * @param {number} businessId
+   * @returns {Promise<{id, name, category, description, city, email, phone, webpage_link}|null>}
+   */
+  async getProfile(businessId) {
+    const result = await db.query(
+      `SELECT id, name, category, description, city, email, phone, webpage_link
+       FROM businesses
+       WHERE id = $1`,
+      [businessId]
+    );
+    return result.rows[0] ?? null;
+  },
+
+  /**
    * Intent: horarios
    * Returns all weekly schedule rows for the business.
    * @param {number} businessId

@@ -40,11 +40,28 @@ const useSocket = () => {
     const socket = socketService.connect();
     const sessionId = socketService.getSessionId();
 
-    if (joinedRoom.current !== roomId) {
-      // Pass sessionId so the backend can load this user's Redis history
+    const doJoin = () => {
       socket.emit('join_room', { roomId, businessId, sessionId });
       joinedRoom.current = roomId;
+    };
+
+    // ── Initial join ─────────────────────────────────────────────────────────
+    // Join the room exactly once. If the socket is already connected (e.g. the
+    // effect is re-running after a dep change), join synchronously.
+    // If not yet connected, use .once() so it fires only on the FIRST connect.
+    if (joinedRoom.current !== roomId) {
+      if (socket.connected) {
+        doJoin();
+      } else {
+        socket.once('connect', doJoin);
+      }
     }
+
+    // ── Reconnection join ────────────────────────────────────────────────────
+    // 'reconnect' fires ONLY on re-connections, never on the initial one.
+    // After a disconnect socket.id changes and room membership is lost.
+    const onReconnect = () => doJoin();
+    socket.io.on('reconnect', onReconnect);
 
     socket.on('message_history', setHistory);
     socket.on('receive_message', addMessage);
@@ -54,6 +71,8 @@ const useSocket = () => {
     socket.on('user_stop_typing', ({ sender }) => removeTypingUser(sender));
 
     return () => {
+      socket.off('connect', doJoin);       // clear pending .once if it never fired
+      socket.io.off('reconnect', onReconnect);
       socket.off('message_history', setHistory);
       socket.off('receive_message', addMessage);
       socket.off('user_typing');

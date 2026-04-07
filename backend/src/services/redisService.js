@@ -32,6 +32,7 @@
  */
 
 const redis = require('../config/redis');
+const { isRedisUp } = require('../config/redis');
 
 // ─── TTL constants ─────────────────────────────────────────────────────────────
 const CTX_TTL_SECONDS  = 210;    // 3.5 minutes — conversational context window
@@ -110,7 +111,7 @@ async function getContext(businessId, sessionId) {
     _memSet(key, raw);
     return _parseContext(raw);
   } catch (err) {
-    console.warn('[Redis] getContext error:', err.message);
+    if (isRedisUp()) console.warn('[Redis] getContext error:', err.message);
     const memRaw = _memGet(key);
     if (memRaw) {
       try { return _parseContext(memRaw); } catch { /* corrupt — fall through */ }
@@ -137,7 +138,7 @@ async function updateContext(businessId, sessionId, data) {
     _memSet(key, serialized);                           // memory-first
     await redis.setex(key, CTX_TTL_SECONDS, serialized);
   } catch (err) {
-    console.warn('[Redis] updateContext error:', err.message);
+    if (isRedisUp()) console.warn('[Redis] updateContext error:', err.message);
     // In-memory write already done — context survives Redis failure
   }
 }
@@ -192,7 +193,7 @@ async function getHistory(businessId, sessionId) {
       try { return JSON.parse(raw); } catch { return null; }
     }).filter(Boolean);
   } catch (err) {
-    console.warn('[Redis] getHistory error:', err.message);
+    if (isRedisUp()) console.warn('[Redis] getHistory error:', err.message);
     return [];
   }
 }
@@ -221,7 +222,7 @@ async function saveMessage(businessId, sessionId, message) {
       await redis.expire(key, HIST_TTL_SECONDS);
     }
   } catch (err) {
-    console.warn('[Redis] saveMessage error:', err.message);
+    if (isRedisUp()) console.warn('[Redis] saveMessage error:', err.message);
     // Non-fatal: UI may not show this message after refresh, but chat continues
   }
 }

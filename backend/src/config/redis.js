@@ -27,16 +27,41 @@ const env   = require('./env');
 const redis = new Redis({
   host: env.REDIS_HOST,
   port: env.REDIS_PORT,
-  // Conecta sólo cuando se ejecuta la primera operación
   lazyConnect: true,
   retryStrategy: (times) => {
-    if (times > 3) return null; // Deja de reintentar — chat sigue sin contexto
+    if (times > 3) return null; // stop retrying — chat continues without Redis
     return Math.min(times * 300, 2000);
   },
 });
 
-redis.on('connect',      ()  => console.log('[Redis] Conectado correctamente'));
-redis.on('error',        (e) => console.error('[Redis] Error:', e.message));
-redis.on('reconnecting', ()  => console.log('[Redis] Reconectando...'));
+// Track whether we've already told the operator that Redis is unavailable.
+// Suppresses the repetitive ECONNREFUSED spam on every operation.
+let _redisDown = false;
+
+redis.on('connect', () => {
+  _redisDown = false;
+  console.log('[Redis] Conectado correctamente');
+});
+
+redis.on('error', (e) => {
+  if (_redisDown) return;   // already logged — stay quiet
+  _redisDown = true;
+  const msg = e.code || e.message || 'Connection refused';
+  console.warn(
+    `[Redis] No disponible (${msg}). El chat continúa sin persistencia — ` +
+    `inicia Redis para activar historial y contexto entre sesiones.`
+  );
+});
+
+redis.on('reconnecting', () => {
+  if (!_redisDown) console.log('[Redis] Reconectando...');
+});
+
+/**
+ * Returns true when Redis is currently reachable.
+ * Used by redisService to skip chatty per-operation error logs.
+ */
+function isRedisUp() { return !_redisDown; }
 
 module.exports = redis;
+module.exports.isRedisUp = isRedisUp;

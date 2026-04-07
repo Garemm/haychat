@@ -108,6 +108,10 @@ const initSocket = (httpServer) => {
       origin: CLIENT_URL,
       methods: ['GET', 'POST'],
     },
+    // Ollama can take up to 120 s — keep the connection alive longer than that.
+    // default pingTimeout=20s would disconnect the socket while waiting for the model.
+    pingTimeout:  150_000,   // 150 s — must exceed OLLAMA_TIMEOUT_MS (120 s)
+    pingInterval:  10_000,   // ping every 10 s so real disconnects are detected quickly
   });
 
   io.on('connection', (socket) => {
@@ -116,7 +120,14 @@ const initSocket = (httpServer) => {
     // ── Join a room ──────────────────────────────────────────────────────────
     socket.on('join_room', async ({ roomId, businessId, sessionId } = {}) => {
       if (!roomId) return;
+
+      // Guard: skip if this socket already joined this exact room (duplicate
+      // join_room emitted by the same client — race condition / React re-render).
+      if (socket.rooms.has(roomId) && socket._lastJoinedRoom === roomId) {
+        return;
+      }
       socket.join(roomId);
+      socket._lastJoinedRoom = roomId;
       console.log(`[Socket] ${socket.id} joined room: ${roomId}`);
 
       // Load history from Redis when sessionId is available; fall back to
@@ -204,11 +215,14 @@ const initSocket = (httpServer) => {
         });
 
         // 3. Process through NLP pipeline
-        const { replyText } = await processMessage({
-          text,
-          sessionId,
-          businessId,
-        });
+        // Signal to all room members that the bot is working on a response
+        io.to(roomId).emit('user_typing', { sender: 'Bot' });
+        let replyText;
+        try {
+          ({ replyText } = await processMessage({ text, sessionId, businessId }));
+        } finally {
+          io.to(roomId).emit('user_stop_typing', { sender: 'Bot' });
+        }
 
         const botTimestamp = new Date().toISOString();
 

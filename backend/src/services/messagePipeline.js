@@ -45,6 +45,7 @@ const {
 const { formatIntentResponse, formatHorarioDay, formatList, formatDescripcionResponse, formatProductAttributes, formatServiceDetail, formatServiceWithContact } = require('./intentResponseFormatter');
 const { getKeywordResponse } = require('../mockai/keywordResponses');
 const { getMockOpenAIResponse, getRAGOpenAIResponse } = require('../temp/mockOpenAI');
+const { generateOllamaResponse } = require('./ollamaService');
 const { shouldUseAI, hasRelevantData } = require('./aiDecisionEngine');
 const { filterRelevantData } = require('./ragFilterService');
 const { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } = require('./attributeSearchService');
@@ -1152,10 +1153,15 @@ async function executeDecision(decision, originalText, normalizedText, businessI
  * @returns {Promise<{ text: string, aiUsed: boolean, ragContext: object|null }>}
  */
 async function handleAIFallback(originalText, normalizedText, businessId, intentResult, entityResult, context) {
-  // Step 1: keyword responses always take priority (greetings, etc.)
-  const keyword = getKeywordResponse(originalText);
-  if (keyword) {
-    return { text: keyword, aiUsed: false, ragContext: null };
+  // Step 1: keyword responses (greetings, etc.) — only for short/standalone messages.
+  // A message like "hola que me recomiendas" contains "hola" as a prefix but is really
+  // an AI request, so we skip the keyword shortcut once the message exceeds 3 words.
+  const _kwWordCount = originalText.trim().split(/\s+/).length;
+  if (_kwWordCount <= 3) {
+    const keyword = getKeywordResponse(originalText);
+    if (keyword) {
+      return { text: keyword, aiUsed: false, ragContext: null };
+    }
   }
 
   // Step 2: AI decision engine — should we even attempt AI?
@@ -1184,8 +1190,18 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
     return { text: fallback, aiUsed: false, ragContext };
   }
 
-  // Step 5: Simulated OpenAI call with RAG context
-  // In production: replace getRAGOpenAIResponse with actual OpenAI API call
+  // Step 5: Ollama LLM with business context + RAG data
+  const ollamaText = await generateOllamaResponse(
+    originalText,
+    ragContext,
+    { lastIntent: context?.lastIntent ?? null, lastEntity: context?.lastEntity ?? null },
+    businessId
+  );
+  if (ollamaText) {
+    return { text: ollamaText, aiUsed: true, ragContext };
+  }
+
+  // Step 6: Final fallback — simulated response when Ollama is unavailable
   const aiResponse = getRAGOpenAIResponse(originalText, ragContext, {
     lastIntent: context?.lastIntent ?? null,
     lastEntity: context?.lastEntity ?? null,
