@@ -26,6 +26,12 @@ const env = {
   REDIS_HOST: process.env.REDIS_HOST || 'localhost',
   REDIS_PORT: parseInt(process.env.REDIS_PORT, 10) || 6379,
 
+  // ── Ollama (local LLM fallback) ──────────────────────────────────────────
+  OLLAMA_URL:        process.env.OLLAMA_URL        || 'http://localhost:11434',
+  OLLAMA_MODEL:      process.env.OLLAMA_MODEL      || 'llama3.2:latest',
+  // 120s: first call loads the model into VRAM/RAM (cold start can take 30-60s)
+  OLLAMA_TIMEOUT_MS: parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000,
+
   // ── OpenAI (uncomment when integrating) ─────────────────────────────────
   // OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 };

@@ -16,10 +16,14 @@ const { createServer } = require('http');
 const app = require('./src/app');
 const { initSocket } = require('./src/sockets/chatSocket');
 const { PORT, NODE_ENV } = require('./src/config/env');
+const { warmupOllama } = require('./src/services/ollamaService');
 
 const httpServer = createServer(app);
 initSocket(httpServer);
 
 httpServer.listen(PORT, () => {
   console.log(`\n🚀 Server ready on http://localhost:${PORT}  [${NODE_ENV}]\n`);
+  // Warm up the Ollama model in the background so the first real user
+  // request doesn't hit the cold-start delay.
+  warmupOllama();
 });

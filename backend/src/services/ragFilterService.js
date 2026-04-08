@@ -41,8 +41,8 @@ const MAX_ITEMS = 15;
  * @returns {'recommendation'|'comparison'|'open_query'|'contextual'|'general'}
  */
 function classifyAIRequest(normalizedText, intentResult, entity, context) {
-  // Recommendation patterns
-  const RECOMMEND_RE = /\b(?:recomiend[ao](?:s|me|n)?|recomendacion|sugier[eo]|sugerencia|que\s+me\s+recomienda[sn]?|que\s+(?:es|esta)\s+bueno|mejor\s+opcion|popular|favorito)\b/;
+  // Recommendation patterns (includes infinitive "recomendar" and modal "puedes/puede recomendar")
+  const RECOMMEND_RE = /\b(?:recomendar|recomiend[ao](?:s|me|n)?|recomendacion|sugier[eo]|sugerencia|que\s+me\s+recomienda[sn]?|que\s+(?:es|esta)\s+bueno|mejor\s+opcion|popular|favorito|(?:puedes?|puede|pueden|podr[ií]as?)\s+recomendar)\b/;
   if (RECOMMEND_RE.test(normalizedText)) return 'recommendation';
 
   // Comparison patterns
