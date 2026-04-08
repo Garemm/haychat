@@ -324,6 +324,14 @@ function enrichFollowUpCandidate(candidate, contextValue) {
   if (baseMatch?.[1]) {
     return `${baseMatch[1]} ${candidate}`;
   }
+  // contextValue is a simple noun with no preposition.
+  // "con ..." is always an attribute qualifier → prepend the base automatically.
+  //   e.g. lastEntity="hamburguesa", candidate="con queso" → "hamburguesa con queso"
+  // "de/del/al/en/a ..." can be a standalone product-name prefix (e.g. "agua de jamaica")
+  //   → leave the candidate as-is so the DB lookup can match it directly.
+  if (/^con\s+/.test(candidate)) {
+    return `${contextValue} ${candidate}`;
+  }
   return candidate;
 }
 
@@ -662,6 +670,42 @@ function decide(intentResult, entityResult, context, normalizedText) {
     }
   }
 
+  // Rule 4.8: "con X" attribute follow-up in product context.
+  // "y una con queso" after context { type: "product", value: "hamburguesa" }
+  // → compound search: hamburguesas that CONTAIN queso.
+  // Must fire before extractFollowUpEntity so "con queso" is never treated as a product name.
+  //
+  // Base-noun extraction: strip any " con X" compound previously stored by an AI turn
+  // (e.g. lastEntity.value = "hamburguesa con picante") so compound search receives
+  // just "hamburguesa" + new attribute, not the accumulated string.
+  const CON_FOLLOWUP_RE = /^(?:y\s+)?(?:(?:un[ao]?|es[ao]?)\s+)?con\s+(?<attr>[\w\u00f1][\w\u00f1\s]{0,30}?)\s*\??$/;
+  if (
+    !hasEntity &&
+    context.lastEntity?.type === 'product' &&
+    context.lastEntity?.value
+  ) {
+    const conMatch = normalizedText.match(CON_FOLLOWUP_RE);
+    const attrWord = conMatch?.groups?.attr?.trim();
+    if (attrWord && attrWord.length >= 2) {
+      // Strip " con X" suffix that may have been persisted by a prior AI turn.
+      const entityBase = context.lastEntity.value.replace(/\s+con\s+.+$/, '').trim();
+      return {
+        strategy: 'attribute',
+        intent: 'productos',
+        entity: {
+          type: 'attribute',
+          value: `${entityBase} con ${attrWord}`,
+          attributeType: 'feature',
+          entityTerm: entityBase,
+          attributeTerm: attrWord,
+          categoryTerm: null,
+        },
+        usedContext: true,
+        reason: `attribute follow-up: "${entityBase}" con "${attrWord}"`,
+      };
+    }
+  }
+
   // Rule 5: Check for follow-up entity ("¿Y pizza mexicana?", "tambien X", bare noun)
   const followUp = extractFollowUpEntity(normalizedText, context.lastEntity);
   if (followUp) {
@@ -719,6 +763,19 @@ function decide(intentResult, entityResult, context, normalizedText) {
  * @returns {Record<string, any>}  Partial update for Redis (or {} for no-op)
  */
 function buildContextUpdate(decision) {
+  // AI path: if a product entity was identified in the message, save it so
+  // follow-up turns (e.g. "y una con queso") can resolve against the right product.
+  // When no entity was found, return {} — existing context is left untouched.
+  if (decision.strategy === 'ai') {
+    if (decision._aiEntity?.value) {
+      return {
+        lastIntent: 'productos',
+        lastEntity: decision._aiEntity,
+      };
+    }
+    return {};
+  }
+
   // Pagination advance — offset is managed inside executeDecision via direct updateContext
   if (decision.strategy === 'pagination') return {};
 
@@ -737,10 +794,25 @@ function buildContextUpdate(decision) {
 
   // Attribute search — store the searched attribute(s) in Redis
   if (decision.strategy === 'attribute') {
+    // When the attribute came from a product-context follow-up (e.g. "con queso" after
+    // "hamburguesa"), preserve the product entity as lastEntity so subsequent
+    // "con X" turns keep anchoring to the same product TYPE (base noun),
+    // not the specific product variant ("hamburguesa doble" → store "hamburguesa").
+    const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
+    const rawEntityTerm = decision.entity.entityTerm;
+    const baseEntityTerm = rawEntityTerm
+      ? (rawEntityTerm.split(/\s+/).find((w) => !PREP_ART.has(w)) || rawEntityTerm.split(/\s+/)[0])
+      : null;
+    const entityToStore = baseEntityTerm
+      ? { type: 'product', value: baseEntityTerm }
+      : { type: 'attribute', value: decision.entity.value };
+    const attrsToStore = decision.entity.entityTerm
+      ? null
+      : (decision._attributes ?? [{ value: decision.entity.value, type: decision.entity.attributeType }]);
     return {
       lastIntent: 'productos',
-      lastEntity: { type: 'attribute', value: decision.entity.value },
-      lastAttributes: decision._attributes ?? [{ value: decision.entity.value, type: decision.entity.attributeType }],
+      lastEntity: entityToStore,
+      lastAttributes: attrsToStore,
       lastEntityFound: true,
       paginationCategory: null,
       paginationOffset: null,
@@ -815,6 +887,43 @@ function buildContextUpdate(decision) {
 }
 
 // ─── Response execution ───────────────────────────────────────────────────────
+
+/**
+ * Queries products with awareness of compound "X con Y" entity values.
+ *
+ * When an AI recommendation stores "hamburguesa con picante" as lastEntity.value,
+ * a plain ILIKE search for that phrase finds nothing (no product is literally named
+ * that). This helper splits the value at " con " and runs searchByCompoundQuery
+ * instead, so results are correctly scoped to the attribute constraint.
+ *
+ * Falls through to a regular queryProducts call when:
+ *   - the value has no " con " separator, OR
+ *   - the compound search returns zero rows.
+ *
+ * @param {string} entityValue
+ * @param {number} businessId
+ * @returns {Promise<{ rows: Array, compound: object|null }>}
+ */
+async function queryProductsCompoundAware(entityValue, businessId) {
+  const CON_SPLIT = /^(.+?)\s+con\s+(.+)$/.exec(entityValue);
+  if (CON_SPLIT) {
+    const [, baseEntity, attrTerm] = CON_SPLIT;
+    try {
+      const { rows } = await searchByCompoundQuery(
+        { entity: baseEntity, attribute: attrTerm, fullPhrase: entityValue },
+        businessId
+      );
+      if (rows.length > 0) {
+        return {
+          rows,
+          compound: { entity: baseEntity, attribute: attrTerm, fullPhrase: entityValue },
+        };
+      }
+    } catch { /* fall through */ }
+  }
+  const rows = await queryProducts(entityValue, businessId);
+  return { rows, compound: null };
+}
 
 /**
  * Executes the pipeline decision and returns the response text.
@@ -962,9 +1071,13 @@ async function executeDecision(decision, originalText, normalizedText, businessI
   // Price-specific response: intent=precios + product entity (from message OR context)
   if (decision.intent === 'precios' && decision.entity?.type === 'product' && decision.entity?.value) {
     try {
-      const rows = await queryProducts(decision.entity.value, businessId);
+      const { rows, compound } = await queryProductsCompoundAware(decision.entity.value, businessId);
       if (rows.length === 0) {
         return `No encontré "${decision.entity.value}" en nuestro catálogo. ¿Quieres ver las opciones disponibles?`;
+      }
+      // Compound match with multiple results: list them so the user can narrow down.
+      if (compound && rows.length > 1) {
+        return formatCompoundQueryResponse(compound, rows, 'entity+attribute');
       }
       const p = rows[0];
       let response = `😊 ${p.name} tiene un precio de $${Number(p.price).toFixed(2)}.`;
@@ -984,7 +1097,7 @@ async function executeDecision(decision, originalText, normalizedText, businessI
       return '¡Claro! ¿Sobre qué producto o servicio te gustaría saber más?';
     }
     try {
-      const rows = await queryProducts(decision.entity.value, businessId);
+      const { rows } = await queryProductsCompoundAware(decision.entity.value, businessId);
       let response = formatDescripcionResponse(decision.entity.value, rows);
       if (rows.length > 0) {
         try {
@@ -1059,11 +1172,16 @@ async function executeDecision(decision, originalText, normalizedText, businessI
       }
 
       try {
-        const rows = await queryProducts(decision.entity.value, businessId);
+        const { rows, compound } = await queryProductsCompoundAware(decision.entity.value, businessId);
         // Log queried products for analytics (fire-and-forget)
         const available = rows.filter((r) => r.is_available !== false);
         if (available.length > 0) {
           logProductQuery(businessId, available.map((r) => r.id));
+        }
+        // Compound entity (e.g. "hamburguesa con picante" from context after AI turn) →
+        // show filtered results using the attribute-aware format.
+        if (compound) {
+          return formatCompoundQueryResponse(compound, rows, 'entity+attribute');
         }
         let response = formatProductResponse(decision.entity.value, rows);
         if (rows.length === 1) {
@@ -1264,6 +1382,35 @@ async function processMessage({ text, sessionId, businessId }) {
     decision._attributes = entityResult._combinedAttributes;
   }
 
+  // When the AI pre-screen fires, capture the most useful entity for context
+  // persistence so follow-up queries ("¿cuánto cuesta?", "y una con jalapeño") can
+  // refer back to what was discussed in this turn.
+  //
+  // Priority for base product:
+  //   1. Explicit product entity detected in the message (e.g. entityResult.value = 'hamburguesa')
+  //   2. Product entity already in context — for messages like "recomiéndame una con picante"
+  //      where no standalone product noun was in the message.
+  //
+  // If the message also carries a "con X" attribute constraint, encode it in the
+  // stored entity value ("hamburguesa con picante") so that follow-up Rule 4.8 and
+  // queryProductsCompoundAware can scope results to the specified attribute.
+  if (decision.strategy === 'ai') {
+    const aiBase =
+      (entityResult.type === 'product' && entityResult.value)
+        ? entityResult.value
+        : (context.lastEntity?.type === 'product' ? context.lastEntity.value : null);
+    if (aiBase) {
+      // Strip any previously stored " con X" compound from the base so we don't
+      // accumulate chains like "hamburguesa con queso con picante".
+      const cleanBase = aiBase.replace(/\s+con\s+.+$/, '').trim();
+      const CON_RE = /\bcon\s+([\w\u00f1][\w\u00f1\s]{1,25}?)(?:\s*\?)?$/;
+      const conMatch = CON_RE.exec(normalizedText);
+      const attrSuffix = conMatch?.[1]?.trim() ?? null;
+      const entityValue = attrSuffix ? `${cleanBase} con ${attrSuffix}` : cleanBase;
+      decision._aiEntity = { type: 'product', value: entityValue };
+    }
+  }
+
   // Logging
   const logs = {
     normalizedText,
@@ -1293,6 +1440,26 @@ async function processMessage({ text, sessionId, businessId }) {
     replyText = aiResult.text;
     aiUsed = aiResult.aiUsed;
     ragContext = aiResult.ragContext;
+
+    // When Ollama actually replied, identify the specific product it recommended
+    // by scanning the reply text for product names present in the RAG data.
+    // This gives follow-up questions ("cuánto cuesta?", "qué incluye?") a precise
+    // anchor instead of the generic entity that arrived in the user's message.
+    //
+    // Example: user says "recomiéndame una pizza" → entityResult = "pizza"
+    //          Ollama replies mentioning "Pizza Margarita"
+    //          → store "pizza margarita" so next query resolves that product exactly.
+    if (aiUsed && ragContext?.type === 'products' && Array.isArray(ragContext.data) && ragContext.data.length > 0) {
+      const normReply = normalize(replyText);
+      // Find the product whose normalized name appears in the reply.
+      // Sort by name length descending so "Pizza Cuatro Quesos" beats "Pizza" on overlap.
+      const sorted = [...ragContext.data].sort((a, b) => b.name.length - a.name.length);
+      const mentioned = sorted.find((p) => normReply.includes(normalize(p.name)));
+      if (mentioned) {
+        // Override _aiEntity with the precise product so buildContextUpdate persists it.
+        decision._aiEntity = { type: 'product', value: normalize(mentioned.name) };
+      }
+    }
   } else {
     // Deterministic backend path
     replyText = await executeDecision(decision, text, normalizedText, businessId, context, sessionId);

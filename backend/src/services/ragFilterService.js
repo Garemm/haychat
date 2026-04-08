@@ -102,22 +102,54 @@ async function filterRelevantData(normalizedText, businessId, intentResult, enti
   try {
     switch (aiType) {
       case 'recommendation': {
-        // Fetch products — prefer category from context/entity if available
-        const catHint = entity?.value || context?.lastEntity?.value;
+        // Prefer explicit entity from message over stale context entity.
+        const explicitEntity = entity?.value || null;
+        const catHint = explicitEntity || context?.lastEntity?.value;
+
+        // If message contains "con X" (attribute filter) AND we have a product type,
+        // use compound search so Ollama only sees the relevant filtered products.
+        // e.g. "recomiéndame una hamburguesa con picante" → fetch hamburguesas con picante.
         let rows;
-        if (catHint) {
-          rows = await queryProducts(catHint, businessId);
+        const CON_IN_MSG = /\bcon\s+(?<attr>[\wñ][\wñ\s]{1,30}?)(?:\s*\?)?$/.exec(normalizedText);
+        const attrHint = CON_IN_MSG?.groups?.attr?.trim();
+        if (catHint && attrHint) {
+          const { searchByCompoundQuery } = require('./attributeSearchService');
+          // Use base noun of catHint (first non-preposition word) so "hamburguesa doble"
+          // broadens to "hamburguesa" when filtering by attribute.
+          const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
+          const baseNoun = catHint.split(/\s+/).find((w) => !PREP_ART.has(w)) || catHint.split(/\s+/)[0];
+          const compound = await searchByCompoundQuery(
+            { entity: baseNoun, attribute: attrHint, fullPhrase: `${baseNoun} con ${attrHint}` },
+            businessId
+          );
+          if (compound.rows.length > 0) {
+            rows = compound.rows.slice(0, MAX_ITEMS);
+          }
+        }
+        if (!rows && catHint) {
+          // Strip any " con X" compound previously stored as lastEntity value
+          // so a plain product search uses just the base noun (e.g. "hamburguesa").
+          const catBase = catHint.replace(/\s+con\s+.+$/, '').trim() || catHint;
+          rows = (await queryProducts(catBase, businessId)).slice(0, MAX_ITEMS);
+          // Retry with just the first word when the catBase is a multi-word phrase
+          // that includes an adjective qualifier (e.g. "hamburguesa picante").
+          // This prevents falling all the way to all-products when the DB has the
+          // base product but not under the exact qualified name.
+          if (rows.length === 0 && /\s/.test(catBase)) {
+            const firstNoun = catBase.split(/\s+/)[0];
+            rows = (await queryProducts(firstNoun, businessId)).slice(0, MAX_ITEMS);
+          }
         }
         if (!rows || rows.length === 0) {
           const allResult = await BusinessModel.getProductos(businessId);
           rows = allResult.slice(0, MAX_ITEMS);
-        } else {
-          rows = rows.slice(0, MAX_ITEMS);
         }
         return {
           type: 'products',
           data: _compactProducts(rows),
-          summary: `${rows.length} productos relevantes para recomendación`,
+          summary: `${rows.length} productos relevantes para recomendación${
+            attrHint ? ` (filtrado por "con ${attrHint}")` : ''
+          }`,
           total: rows.length,
         };
       }

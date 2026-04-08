@@ -284,6 +284,29 @@ async function searchByCompoundQuery({ entity, attribute, fullPhrase }, business
     if (result.rows.length > 0) return { rows: result.rows, strategy: 'entity+attribute' };
   }
 
+  // ── Layer 2c: base-noun + attribute ─────────────────────────────────────
+  // Activated when entity is multi-word (e.g. "hamburguesa doble") and Layer 2
+  // found nothing. Strips adjective/modifier words and retries with just the
+  // first meaningful noun ("hamburguesa") + attribute.
+  // Prevents "hamburguesa doble + queso" from leaking into attribute-only results
+  // that include unrelated products (pizza con queso, tacos con queso, etc.).
+  if (/\s/.test(entity)) {
+    const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
+    const baseNoun = entity.split(/\s+/).find((w) => !PREP_ART.has(w)) || entity.split(/\s+/)[0];
+    if (baseNoun !== entity) {
+      const baseClause    = buildTermClause(baseNoun, 2);
+      const attrClause2c  = buildTermClause(attribute, baseClause.nextIndex);
+      const params2c = [businessId, ...baseClause.params, ...attrClause2c.params];
+      const result2c = await db.query(
+        `${PRODUCT_SELECT} WHERE p.business_id = $1 ` +
+        `AND ${baseClause.clause} AND ${attrClause2c.clause} ` +
+        `ORDER BY p.name ASC LIMIT ${ATTR_SEARCH_LIMIT}`,
+        params2c
+      );
+      if (result2c.rows.length > 0) return { rows: result2c.rows, strategy: 'base+attribute' };
+    }
+  }
+
   // ── Layer 2b: attribute-only with word boundary ───────────────────────────
   // Activated ONLY when the attribute is NOT a material word.
   //

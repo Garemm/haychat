@@ -31,6 +31,16 @@ const { extractAttribute, extractCompoundQuery, extractCategoryAttributeQuery, i
 
 // ─── Stopwords ────────────────────────────────────────────────────────────────
 
+/**
+ * Single article/pronoun words that should NEVER be returned as a standalone
+ * entity candidate. They can appear inside multi-word entity names (e.g. "tacos
+ * de la casa") but alone they are meaningless and cause ILIKE '%una%' queries
+ * that match every product description containing the Spanish article "una".
+ */
+const BARE_ARTICLES = new Set([
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
+]);
+
 const ENTITY_STOPWORDS = new Set([
   'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
   'de', 'del', 'al', 'en', 'por', 'para', 'con', 'sin',
@@ -136,6 +146,10 @@ const PRODUCT_QUERY_PATTERNS = [
   /esta(?:s|n)?\s+disponible[s]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /hay\s+stock\s+de\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /tiene(?:s|n)?\s+disponibilidad\s+(?:de\s+)?(?:el\s+|la\s+|los\s+|las\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  // "recomiéndame una hamburguesa picante" / "sugíreme unos tacos al pastor"
+  // Extracts the product noun phrase that follows a recommendation/suggestion verb.
+  // Placed before generic patterns so the specific verb takes priority.
+  /\b(?:recomiend[ao](?:me|nos)?|sugier[eo](?:me|nos)?)\s+(?:un[ao]s?\s+)?(?<entity>[\wñ]+(?:\s+[\wñ]+){0,3}?)(?:\s*\?|\s*$)/,
   // "que tipo(s) de X tienen/tienes/tiene/hay/vende/venden" — entity inside "que tipo de … verb"
   // MUST appear before the generic "que X tienen" pattern below.
   /^que\s+tipos?\s+de\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,3})\s+(?:tiene[sn]?|tienen|hay|vende[sn]?|venden|ofrece[n]?|maneja[n]?)\s*\??$/,
@@ -220,7 +234,7 @@ function extractEntityCandidate(normalizedText) {
       const raw = match.groups.entity.trim();
       const stripped = stripLeadingStopwords(raw);
       const cleaned = cleanEntityCandidate(stripped);
-      if (cleaned.length >= 2 && !isBlocklisted(cleaned)) {
+      if (cleaned.length >= 2 && !isBlocklisted(cleaned) && !BARE_ARTICLES.has(cleaned)) {
         return cleaned;
       }
     }
@@ -238,7 +252,7 @@ function extractEntityCandidate(normalizedText) {
         const stripped = stripLeadingStopwords(normalize(n));
         return cleanEntityCandidate(stripped);
       })
-      .filter((n) => n.length >= 2 && !isBlocklisted(n))
+      .filter((n) => n.length >= 2 && !isBlocklisted(n) && !BARE_ARTICLES.has(n))
       .sort((a, b) => b.length - a.length)[0];
     if (best) return best;
   }
