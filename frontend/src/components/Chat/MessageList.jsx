@@ -1,15 +1,16 @@
 import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import Message from './Message';
+import OrderForm from './OrderForm';
 import { useChat } from '../../context/ChatContext';
 
 const MessageList = () => {
-  const { messages, username, typingUsers } = useChat();
+  const { messages, username, typingUsers, pedidoForm } = useChat();
   const bottomRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingUsers]);
+  }, [messages, typingUsers, pedidoForm]);
 
   return (
     <div className="message-list">
@@ -35,6 +36,11 @@ const MessageList = () => {
             <span className="typing-dots__label">{typingUsers[0]} está escribiendo…</span>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* Order form — rendered inline when the server activates it */}
+      <AnimatePresence>
+        {pedidoForm && <OrderForm key="order-form" />}
       </AnimatePresence>
 
       <div ref={bottomRef} />

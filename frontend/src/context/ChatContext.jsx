@@ -1,15 +1,3 @@
-/**
- * context/ChatContext.jsx — Global chat state.
- *
- * Holds: current room, messages, username, and typing indicators.
- *
- * ISOLACIÓN POR SESIÓN:
- *   El roomId se calcula como `${businessId}:${sessionId}`, garantizando que
- *   cada usuario tenga su propio canal Socket.io y su propio historial en Redis.
- *   Dos dispositivos del mismo usuario generan UUIDs distintos → salas distintas
- *   → históricos y mensajes en tiempo real completamente separados.
- */
-
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import socketService from '../services/socketService';
 
@@ -22,6 +10,9 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
   const [username, setUsername]       = useState('');
   const [typingUsers, setTypingUsers] = useState([]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  // pedidoForm: null while no form is pending, or { businessId } when the server
+  // requests the order form to be shown inside the chat.
+  const [pedidoForm, setPedidoFormState] = useState(null);
 
   const addMessage = useCallback((message) => {
     setMessages((prev) => [...prev, { ...message, isNew: true }]);
@@ -41,6 +32,9 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
 
   const toggleVoice = useCallback(() => setVoiceEnabled((v) => !v), []);
 
+  const setPedidoForm   = useCallback((data) => setPedidoFormState(data), []);
+  const clearPedidoForm = useCallback(() => setPedidoFormState(null), []);
+
   return (
     <ChatContext.Provider
       value={{
@@ -51,6 +45,7 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
         businessId,
         businessName,
         voiceEnabled,
+        pedidoForm,
         setRoomId,
         setUsername,
         addMessage,
@@ -58,6 +53,8 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
         addTypingUser,
         removeTypingUser,
         toggleVoice,
+        setPedidoForm,
+        clearPedidoForm,
       }}
     >
       {children}

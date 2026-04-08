@@ -29,6 +29,7 @@ const { getHistory, saveMessage: redisSaveMessage } = require('../services/redis
 const { getCategories } = require('../services/businessInfoService');
 const { formatList }    = require('../services/intentResponseFormatter');
 const BusinessModel     = require('../models/businessModel');
+const PedidoModel       = require('../models/pedidoModel');
 
 /** Milliseconds of inactivity before sending the re-engagement message.
  *  Matches SESSION_TTL_SECONDS so the message fires exactly when Redis context expires. */
@@ -247,6 +248,107 @@ const initSocket = (httpServer) => {
     socket.on('stop_typing', ({ roomId, sender }) => {
       socket.to(roomId).emit('user_stop_typing', { sender });
     });
+
+    // ── Solicitar compra ─────────────────────────────────────────────────────
+    // Client emits this when the user wants to place an order.
+    // Server checks acepto_pedidos and emits either:
+    //   'mostrar_formulario_pedido' — purchase orders are enabled
+    //   'info_contacto'             — orders are disabled, return contact info
+    socket.on('solicitar_compra', async ({ businessId } = {}) => {
+      if (!businessId || typeof businessId !== 'number') {
+        socket.emit('error', { message: 'businessId requerido' });
+        return;
+      }
+      try {
+        const info = await PedidoModel.getOrderStatus(businessId);
+        if (!info) {
+          socket.emit('error', { message: 'Negocio no encontrado' });
+          return;
+        }
+        if (info.acepto_pedidos) {
+          socket.emit('mostrar_formulario_pedido', { businessId });
+        } else {
+          socket.emit('info_contacto', {
+            mensaje:  'En este momento no estamos aceptando pedidos en línea. Puedes contactarnos directamente:',
+            telefono: info.phone  ?? null,
+            email:    info.email  ?? null,
+          });
+        }
+      } catch (err) {
+        console.error('[Socket] solicitar_compra error:', err.message);
+        socket.emit('error', { message: 'Error al verificar disponibilidad de pedidos.' });
+      }
+    });
+
+    // ── Enviar pedido ────────────────────────────────────────────────────────
+    // Client emits this when the user submits the order form.
+    // Server validates, inserts into DB, and emits 'pedido_confirmado'.
+    socket.on('enviar_pedido', async ({
+      businessId,
+      nombreCliente,
+      telefono,
+      detallePedido,
+      horaRecogida,
+    } = {}) => {
+      // ── Input validation ──────────────────────────────────────────────────
+      if (!businessId || typeof businessId !== 'number') {
+        socket.emit('pedido_error', { message: 'businessId requerido' });
+        return;
+      }
+      if (!nombreCliente || typeof nombreCliente !== 'string' || !nombreCliente.trim()) {
+        socket.emit('pedido_error', { message: 'Nombre del cliente requerido' });
+        return;
+      }
+      if (!telefono || typeof telefono !== 'string' || !telefono.trim()) {
+        socket.emit('pedido_error', { message: 'Teléfono requerido' });
+        return;
+      }
+      if (!detallePedido || typeof detallePedido !== 'string' || !detallePedido.trim()) {
+        socket.emit('pedido_error', { message: 'Detalle del pedido requerido' });
+        return;
+      }
+      if (!horaRecogida || typeof horaRecogida !== 'string' || !horaRecogida.trim()) {
+        socket.emit('pedido_error', { message: 'Hora de recogida requerida' });
+        return;
+      }
+      if (nombreCliente.trim().length > 150) {
+        socket.emit('pedido_error', { message: 'Nombre demasiado largo (máx. 150 caracteres)' });
+        return;
+      }
+      if (telefono.trim().length > 50) {
+        socket.emit('pedido_error', { message: 'Teléfono demasiado largo (máx. 50 caracteres)' });
+        return;
+      }
+      if (detallePedido.trim().length > 2000) {
+        socket.emit('pedido_error', { message: 'Detalle demasiado largo (máx. 2000 caracteres)' });
+        return;
+      }
+      if (horaRecogida.trim().length > 50) {
+        socket.emit('pedido_error', { message: 'Hora de recogida demasiado larga (máx. 50 caracteres)' });
+        return;
+      }
+
+      try {
+        const pedido = await PedidoModel.createPedido({
+          businessId,
+          nombreCliente: nombreCliente.trim(),
+          telefono:      telefono.trim(),
+          detallePedido: detallePedido.trim(),
+          horaRecogida:  horaRecogida.trim(),
+        });
+
+        socket.emit('pedido_confirmado', {
+          id:     pedido.id,
+          fecha:  pedido.fecha,
+          mensaje: `¡Tu pedido #${pedido.id} fue recibido exitosamente! Te contactaremos pronto. 🎉`,
+        });
+      } catch (err) {
+        console.error('[Socket] enviar_pedido error:', err.message);
+        socket.emit('pedido_error', { message: 'Error al registrar el pedido. Por favor intenta de nuevo.' });
+      }
+    });
+
+
 
     // ── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', () => {

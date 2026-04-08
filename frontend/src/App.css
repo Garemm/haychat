@@ -1142,3 +1142,152 @@ body {
 /* ── Speaking indicator — handled via .chat-header__status--speaking in header block ── */
 
 
+/* ═══════════════════════════════════════════════════════════════════
+   PURCHASE FLOW — buy button & order form
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── "Hacer pedido" quick-action row above the input ──────────────── */
+.message-input__buy-row {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0.35rem 1rem 0;
+}
+
+.buy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.32rem 0.85rem;
+  border-radius: 999px;
+  border: 1.5px solid rgba(91,80,245,0.28);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+  white-space: nowrap;
+}
+.buy-btn:hover {
+  background: rgba(91,80,245,0.14);
+  border-color: rgba(91,80,245,0.5);
+}
+
+/* ── Order form card — rendered inside the message list ───────────── */
+.order-form {
+  margin: 0.75rem 0.5rem 0.25rem;
+  padding: 1.1rem 1.15rem 1rem;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(91,80,245,0.18);
+  border-radius: 18px;
+  box-shadow: 0 4px 24px rgba(91,80,245,0.1), 0 1px 4px rgba(0,0,0,0.05);
+}
+
+.order-form__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.order-form__icon { font-size: 1.1rem; }
+.order-form__title {
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.order-form__close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.order-form__close:hover { color: var(--text); background: var(--surface-3); }
+
+.order-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.65rem;
+}
+.order-form__field label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+
+.order-form__input,
+.order-form__textarea {
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+  resize: none;
+}
+.order-form__input:focus,
+.order-form__textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  background: #fff;
+}
+.order-form__input--error {
+  border-color: rgba(239,68,68,0.55) !important;
+}
+.order-form__textarea { line-height: 1.45; }
+
+.order-form__error {
+  font-size: 0.74rem;
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.order-form__actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
+.order-form__cancel {
+  padding: 0.45rem 1rem;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.order-form__cancel:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.order-form__cancel:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.order-form__submit {
+  padding: 0.45rem 1.25rem;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent-grad);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(91,80,245,0.28);
+  transition: opacity 0.15s;
+}
+.order-form__submit:disabled { opacity: 0.6; cursor: not-allowed; }

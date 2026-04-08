@@ -18,7 +18,7 @@ const MessageInput = ({ voice }) => {
   const [focused, setFocused] = useState(false);
   const textRef      = useRef('');
   const typingTimer  = useRef(null);
-  const { sendMessage, emitTyping, emitStopTyping } = useSocket();
+  const { sendMessage, emitTyping, emitStopTyping, solicitarCompra } = useSocket();
 
   // Destructure voice props with safe defaults
   const {
@@ -137,6 +137,19 @@ const MessageInput = ({ voice }) => {
           </motion.div>
         )}
       </AnimatePresence>
+      <div className="message-input__buy-row">
+        <motion.button
+          type="button"
+          className="buy-btn"
+          aria-label="Realizar pedido"
+          onClick={solicitarCompra}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.92 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+        >
+          🛒 Hacer pedido
+        </motion.button>
+      </div>
       <motion.div
       className={`message-input${focused ? ' message-input--focused' : ''}${isListening ? ' message-input--listening' : ''}`}
       animate={{ boxShadow: isListening
