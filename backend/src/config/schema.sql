@@ -33,6 +33,7 @@ DROP TABLE IF EXISTS businesses          CASCADE;
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE businesses (
     id           SERIAL        PRIMARY KEY,
+    chat_uuid    UUID          NOT NULL DEFAULT gen_random_uuid() UNIQUE,
     name         VARCHAR(255)  NOT NULL,
     category     VARCHAR(50)   NOT NULL
                      CHECK (category IN ('restaurant', 'hardware', 'stationery')),

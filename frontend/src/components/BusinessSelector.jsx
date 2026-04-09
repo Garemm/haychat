@@ -89,7 +89,7 @@ const BusinessSelector = () => {
                   whileTap={{ scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                   onClick={() =>
-                    navigate(`/chat/${biz.id}`, {
+                    navigate(`/chat/${biz.chat_uuid}`, {
                       state: { name: biz.name, city: biz.city },
                     })
                   }
