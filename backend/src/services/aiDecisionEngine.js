@@ -85,6 +85,13 @@ function shouldUseAI(normalizedText, intentResult, entityResult, context) {
     return { routing: 'ai', reason: 'nutritional/capacity question', aiCategory: 'open_query' };
   }
 
+  // Ingredient/content descriptive questions: "la quesadilla tiene queso?", "lleva carne?", "contiene gluten?"
+  // These are yes/no descriptive questions about a product, not catalog searches.
+  const PRODUCT_DESC_RE = /\b(?:tiene[ns]?|lleva[ns]?|contiene[ns]?|incluye[ns]?|trae[ns]?|viene[ns]?\s+con|es\s+con|viene\s+con)\b/;
+  if (PRODUCT_DESC_RE.test(normalizedText)) {
+    return { routing: 'ai', reason: 'product description/ingredient question', aiCategory: 'open_query' };
+  }
+
   // ── Guard: entity detected → deterministic backend can handle ─────────────
   if (entityResult.type && entityResult.value) {
     return { routing: 'backend', reason: 'entity detected by backend', aiCategory: null };

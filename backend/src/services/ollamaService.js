@@ -37,11 +37,12 @@
 
 const env = require('../config/env');
 const BusinessModel = require('../models/businessModel');
+const { getHistory } = require('./redisService');
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const OLLAMA_URL        = env.OLLAMA_URL        || 'http://localhost:11434';
-const OLLAMA_MODEL      = env.OLLAMA_MODEL      || 'llama3'; //llama3.2
+const OLLAMA_MODEL      = env.OLLAMA_MODEL      || 'llama3.2';
 const OLLAMA_TIMEOUT_MS = env.OLLAMA_TIMEOUT_MS || 30_000;
 
 // ─── Business profile cache ───────────────────────────────────────────────────
@@ -198,19 +199,14 @@ function buildSystemPrompt(profile, ragContext) {
 
   const ragBlock = formatRagBlock(ragContext);
 
+  const desc = profile.description ? profile.description.slice(0, 80) : null;
+
   const parts = [
-    `Eres el asistente virtual de "${profile.name}", un negocio del giro: ${giro}.`,
-    profile.description ? `Descripción del negocio: ${profile.description}` : null,
-    contact             ? `Contacto: ${contact}` : null,
-    ragBlock            ? `\n${ragBlock}` : null,
-    '',
-    'INSTRUCCIONES IMPORTANTES:',
-    '- Responde SIEMPRE en español, con un tono amable y conversacional.',
-    '- Habla únicamente sobre este negocio y los datos que tienes en este contexto.',
-    '- NO inventes precios, productos, horarios ni información que no esté arriba.',
-    '- Si no tienes información suficiente, dilo con honestidad y sugiere que el cliente llame o visite el negocio.',
-    '- Sé conciso: 1 a 3 oraciones es suficiente para la mayoría de preguntas.',
-    '- Puedes usar emojis ocasionalmente para un tono cálido, pero no en exceso.',
+    `Asistente de "${profile.name}" (${giro}).`,
+    desc    ? `Info: ${desc}` : null,
+    contact ? `Contacto: ${contact}` : null,
+    ragBlock ? `\n${ragBlock}` : null,
+    '\nReglas: responde en español, máx 2 oraciones, solo datos del contexto, sin inventar.',
   ];
 
   return parts.filter((l) => l !== null).join('\n');
@@ -226,7 +222,7 @@ function buildSystemPrompt(profile, ragContext) {
  * @param {string} userMessage
  * @returns {Promise<string>}
  */
-async function _callOllama(systemPrompt, userMessage) {
+async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
 
@@ -240,11 +236,13 @@ async function _callOllama(systemPrompt, userMessage) {
         stream: false,
         messages: [
           { role: 'system', content: systemPrompt },
+          ...historyMessages,
           { role: 'user',   content: userMessage  },
         ],
         options: {
-          temperature: 0.4,
-          num_predict: 300,
+          temperature: 0.3,
+          num_predict: 80,
+          num_ctx:     1024,
         },
       }),
     });
@@ -284,7 +282,7 @@ async function _callOllama(systemPrompt, userMessage) {
  * @param {number}  businessId
  * @returns {Promise<string|null>}  Model reply, or null on error/unavailability
  */
-async function generateOllamaResponse(userMessage, ragContext, sessionContext, businessId) {
+async function generateOllamaResponse(userMessage, ragContext, sessionContext, businessId, sessionId = null) {
   try {
     const profile = await getBusinessProfile(businessId);
     if (!profile) {
@@ -292,7 +290,23 @@ async function generateOllamaResponse(userMessage, ragContext, sessionContext, b
       return null;
     }
     const systemPrompt = buildSystemPrompt(profile, ragContext);
-    const reply = await _callOllama(systemPrompt, userMessage);
+
+    // Build last 2 turns from Redis history to give Ollama conversational context
+    let historyMessages = [];
+    if (sessionId) {
+      try {
+        const history = await getHistory(businessId, sessionId);
+        const recent = history.slice(-4); // last 4 entries = 2 turns
+        historyMessages = recent
+          .filter((m) => m?.sender && m?.text)
+          .map((m) => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.text.slice(0, 200),
+          }));
+      } catch { /* non-fatal */ }
+    }
+
+    const reply = await _callOllama(systemPrompt, userMessage, historyMessages);
     console.log(`[Ollama] Response for business=${businessId} (${reply.length} chars)`);
     return reply;
   } catch (err) {
