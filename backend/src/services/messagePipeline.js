@@ -48,6 +48,7 @@ const { getMockOpenAIResponse, getRAGOpenAIResponse } = require('../temp/mockOpe
 const { generateOllamaResponse } = require('./ollamaService');
 const { shouldUseAI, hasRelevantData } = require('./aiDecisionEngine');
 const { filterRelevantData } = require('./ragFilterService');
+const { handleAIGate } = require('./subscriptionController');
 const { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } = require('./attributeSearchService');
 const { extractAttribute } = require('./attributeExtractor');
 
@@ -1433,35 +1434,35 @@ async function processMessage({ text, sessionId, businessId }) {
   let ragContext = null;
 
   if (decision.strategy === 'ai') {
-    // Hybrid AI path: decision engine + RAG filter + simulated OpenAI
-    const aiResult = await handleAIFallback(
-      text, normalizedText, businessId, intentResult, entityResult, context
-    );
-    replyText = aiResult.text;
-    aiUsed = aiResult.aiUsed;
-    ragContext = aiResult.ragContext;
+    // ── Gate de suscripción ────────────────────────────────────────────────────
+    // Antes de llamar a llama3 se verifica subscription_id del negocio en la BD:
+    //   · 1 (Lite)    → devuelve placeholder sin invocar la IA.
+    //   · 2 (Premium) → RAG filter + llama3 (Ollama). Si Ollama está caído, mock RAG.
+    const gateResult = await handleAIGate({
+      businessId,
+      originalText:   text,
+      normalizedText,
+      intentResult,
+      entityResult,
+      context,
+    });
+    replyText  = gateResult.text;
+    aiUsed     = gateResult.aiUsed;
+    ragContext  = gateResult.ragContext;
 
-    // When Ollama actually replied, identify the specific product it recommended
-    // by scanning the reply text for product names present in the RAG data.
-    // This gives follow-up questions ("cuánto cuesta?", "qué incluye?") a precise
-    // anchor instead of the generic entity that arrived in the user's message.
-    //
-    // Example: user says "recomiéndame una pizza" → entityResult = "pizza"
-    //          Ollama replies mentioning "Pizza Margarita"
-    //          → store "pizza margarita" so next query resolves that product exactly.
+    // Cuando llama3 respondió (Premium), identificar el producto específico mencionado
+    // escaneando la respuesta contra los datos RAG. Permite que preguntas de seguimiento
+    // ("cuánto cuesta?", "qué incluye?") resuelvan el producto exacto.
     if (aiUsed && ragContext?.type === 'products' && Array.isArray(ragContext.data) && ragContext.data.length > 0) {
       const normReply = normalize(replyText);
-      // Find the product whose normalized name appears in the reply.
-      // Sort by name length descending so "Pizza Cuatro Quesos" beats "Pizza" on overlap.
       const sorted = [...ragContext.data].sort((a, b) => b.name.length - a.name.length);
       const mentioned = sorted.find((p) => normReply.includes(normalize(p.name)));
       if (mentioned) {
-        // Override _aiEntity with the precise product so buildContextUpdate persists it.
         decision._aiEntity = { type: 'product', value: normalize(mentioned.name) };
       }
     }
   } else {
-    // Deterministic backend path
+    // ── Ruta determinista: intents + contexto + valores ────────────────────────
     replyText = await executeDecision(decision, text, normalizedText, businessId, context, sessionId);
   }
 

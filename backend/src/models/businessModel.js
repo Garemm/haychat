@@ -344,6 +344,22 @@ const BusinessModel = {
     );
     return result.rows;
   },
+
+  /**
+   * Returns the subscription plan ID for a business.
+   *   1 = Lite    → no AI, placeholder response
+   *   2 = Premium → full AI via llama3 (Ollama)
+   * Returns null when the business row is not found.
+   * @param {number} businessId
+   * @returns {Promise<number|null>}
+   */
+  async getSubscriptionId(businessId) {
+    const result = await db.query(
+      'SELECT subscription_id FROM businesses WHERE id = $1',
+      [businessId]
+    );
+    return result.rows[0]?.subscription_id ?? null;
+  },
 };
 
 module.exports = BusinessModel;
