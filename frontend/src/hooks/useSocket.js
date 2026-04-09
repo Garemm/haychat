@@ -36,6 +36,8 @@ const useSocket = () => {
     removeTypingUser,
     setPedidoForm,
     clearPedidoForm,
+    setPedidoSubmitted,
+    updatePedidoReceipt,
   } = useChat();
 
   const joinedRoom = useRef(null);
@@ -93,15 +95,15 @@ const useSocket = () => {
       });
     };
 
-    // Server confirmed the pedido was saved → inject confirmation message + close form
-    const onPedidoConfirmado = ({ mensaje }) => {
-      clearPedidoForm();
-      addMessage({
-        id:        crypto.randomUUID(),
-        sender:    'Bot',
-        text:      mensaje || '¡Pedido recibido! Te contactaremos pronto.',
-        timestamp: new Date().toISOString(),
-      });
+    // Server confirmed the pedido was saved → switch form → receipt card
+    const onPedidoConfirmado = (pedido) => {
+      // pedido: { id, fecha, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin }
+      setPedidoSubmitted(pedido);
+    };
+
+    // Admin updated order fields → merge into the visible receipt card
+    const onPedidoActualizado = (changes) => {
+      updatePedidoReceipt(changes);
     };
 
     // Server returned a validation/DB error during enviar_pedido
@@ -117,6 +119,7 @@ const useSocket = () => {
     socket.on('mostrar_formulario_pedido', onMostrarFormulario);
     socket.on('info_contacto',            onInfoContacto);
     socket.on('pedido_confirmado',        onPedidoConfirmado);
+    socket.on('pedido_actualizado',       onPedidoActualizado);
     socket.on('pedido_error',             onPedidoError);
 
     return () => {
@@ -129,9 +132,10 @@ const useSocket = () => {
       socket.off('mostrar_formulario_pedido', onMostrarFormulario);
       socket.off('info_contacto',            onInfoContacto);
       socket.off('pedido_confirmado',        onPedidoConfirmado);
+      socket.off('pedido_actualizado',       onPedidoActualizado);
       socket.off('pedido_error',             onPedidoError);
     };
-  }, [roomId, username, addMessage, setHistory, addTypingUser, removeTypingUser, setPedidoForm, clearPedidoForm]);
+  }, [roomId, username, addMessage, setHistory, addTypingUser, removeTypingUser, setPedidoForm, clearPedidoForm, setPedidoSubmitted, updatePedidoReceipt]);
 
   /**
    * Envía el mensaje del usuario incluyendo el sessionId persistente.
@@ -159,7 +163,8 @@ const useSocket = () => {
    * @param {{ nombreCliente: string, telefono: string, detallePedido: string, horaRecogida: string }} data
    */
   const submitPedido = (data) => {
-    socketService.getSocket().emit('enviar_pedido', { businessId, ...data });
+    const sessionId = socketService.getSessionId();
+    socketService.getSocket().emit('enviar_pedido', { businessId, sessionId, ...data });
   };
 
   return { sendMessage, emitTyping, emitStopTyping, solicitarCompra, submitPedido };

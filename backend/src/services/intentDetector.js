@@ -29,6 +29,15 @@ const { normalize } = require('./normalize');
 const MIN_CONFIDENCE = 1;
 
 /**
+ * Runtime intents dictionary loaded from Redis by initIntents().
+ * When non-null this is the morphologically expanded version of intents.js
+ * (produced by intentExpanderService.bootstrapIntents at server startup).
+ * Stays null until initIntents() resolves, at which point detectIntent() and
+ * scoreIntents() automatically use the richer dictionary.
+ */
+let _activeIntents = null;
+
+/**
  * High-priority pre-check patterns for the 'descripcion' intent.
  *
  * These run BEFORE keyword scoring to avoid substring collisions:
@@ -68,10 +77,21 @@ const DESCRIPCION_PRIORITY_PATTERNS = [
  * @param {object} [intentsConfig] Custom intents config (for testing). Defaults to intents.js.
  * @returns {Record<string, number>}
  */
-function scoreIntents(normalizedText, intentsConfig = intents) {
+/**
+ * Returns the active intents dictionary.
+ * Priority: explicit override arg → Redis-expanded dict → static intents.js
+ * @param {object|undefined} override  Passed as second arg to detectIntent/scoreIntents.
+ * @returns {object}
+ */
+function _getIntents(override) {
+  return override || _activeIntents || intents;
+}
+
+function scoreIntents(normalizedText, intentsConfig = undefined) {
+  const activeIntents = _getIntents(intentsConfig);
   const scores = {};
 
-  for (const [intentKey, intent] of Object.entries(intentsConfig)) {
+  for (const [intentKey, intent] of Object.entries(activeIntents)) {
     let totalScore = 0;
 
     for (const { phrase, weight } of intent.keywords) {
@@ -96,7 +116,7 @@ function scoreIntents(normalizedText, intentsConfig = intents) {
  * @param {object} [intentsConfig] Custom intents config (for testing).
  * @returns {{ intent: string|null, score: number, scores: Record<string, number>, confident: boolean }}
  */
-function detectIntent(message, intentsConfig = intents) {
+function detectIntent(message, intentsConfig = undefined) {
   if (!message) return { intent: null, score: 0, scores: {}, confident: false };
 
   const normalizedText = normalize(message);
@@ -142,8 +162,34 @@ function detectIntent(message, intentsConfig = intents) {
  * @param {object} [intentsConfig]
  * @returns {boolean}
  */
-function isStandaloneIntent(intentKey, intentsConfig = intents) {
-  return intentsConfig[intentKey]?.standalone === true;
+function isStandaloneIntent(intentKey, intentsConfig = undefined) {
+  return _getIntents(intentsConfig)[intentKey]?.standalone === true;
 }
 
-module.exports = { detectIntent, scoreIntents, isStandaloneIntent, MIN_CONFIDENCE };
+/**
+ * Loads the morphologically expanded intents dictionary from Redis into the
+ * module-level _activeIntents variable.  Must be called AFTER bootstrapIntents()
+ * has run in server.js.
+ *
+ * Falls back gracefully: if Redis is unavailable the static intents.js stays
+ * in use and detection continues without interruption.
+ *
+ * @returns {Promise<void>}
+ */
+async function initIntents() {
+  try {
+    const { getExpandedIntents } = require('./redisService');
+    const expanded = await getExpandedIntents();
+    if (expanded && typeof expanded === 'object') {
+      _activeIntents = expanded;
+      const total = Object.values(expanded).reduce((s, i) => s + i.keywords.length, 0);
+      console.log(`[IntentDetector] Vocabulario activo: ${total} keywords (expandido desde Redis)`);
+    } else {
+      console.log('[IntentDetector] Redis no disponible — usando vocabulario estático');
+    }
+  } catch (err) {
+    console.warn('[IntentDetector] initIntents error:', err.message);
+  }
+}
+
+module.exports = { detectIntent, scoreIntents, isStandaloneIntent, initIntents, MIN_CONFIDENCE };

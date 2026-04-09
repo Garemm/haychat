@@ -23,11 +23,17 @@ ALTER TABLE businesses
 CREATE TABLE IF NOT EXISTS pedidos (
     id               SERIAL        PRIMARY KEY,
     business_id      INT           NOT NULL REFERENCES businesses (id) ON DELETE CASCADE,
+    session_id       VARCHAR(128),
     nombre_cliente   VARCHAR(150)  NOT NULL,
     telefono         VARCHAR(50)   NOT NULL,
     detalle_pedido   TEXT          NOT NULL,
     hora_recogida    VARCHAR(50)   NOT NULL,
+    notas_admin      TEXT,
     fecha            DATE          NOT NULL DEFAULT CURRENT_DATE,
     aceptado         BOOLEAN       NOT NULL DEFAULT false,
     created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+-- Add session_id and notas_admin to existing tables (safe to re-run)
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS session_id   VARCHAR(128);
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS notas_admin  TEXT;

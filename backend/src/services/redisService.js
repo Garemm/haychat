@@ -227,6 +227,54 @@ async function saveMessage(businessId, sessionId, message) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXPANDED INTENTS DICTIONARY — cached morphological expansions
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * TTL for the expanded intents dictionary stored in Redis.
+ * Refreshed on every server startup via bootstrapIntents().
+ * 7 days is generous: the server starts far more frequently.
+ */
+const INTENTS_TTL = 604800; // 7 days
+
+function _intentsKey() {
+  return 'intents:expanded';
+}
+
+/**
+ * Persists the morphologically expanded intents dictionary to Redis.
+ * Called by intentExpanderService.bootstrapIntents() at server startup.
+ *
+ * @param {object} dict  Expanded intents object (same shape as intents.js).
+ * @returns {Promise<void>}
+ */
+async function saveExpandedIntents(dict) {
+  try {
+    await redis.setex(_intentsKey(), INTENTS_TTL, JSON.stringify(dict));
+  } catch (err) {
+    if (isRedisUp()) console.warn('[Redis] saveExpandedIntents error:', err.message);
+  }
+}
+
+/**
+ * Retrieves the morphologically expanded intents dictionary from Redis.
+ * Returns null when the key does not exist or Redis is unavailable.
+ * intentDetector.js falls back to the static intents.js when null.
+ *
+ * @returns {Promise<object|null>}
+ */
+async function getExpandedIntents() {
+  try {
+    const raw = await redis.get(_intentsKey());
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (err) {
+    if (isRedisUp()) console.warn('[Redis] getExpandedIntents error:', err.message);
+    return null;
+  }
+}
+
 // ─── Exports ───────────────────────────────────────────────────────────────────
 module.exports = {
   // Context
@@ -238,4 +286,7 @@ module.exports = {
   getHistory,
   saveMessage,
   HIST_TTL_SECONDS,
+  // Expanded intents dictionary
+  saveExpandedIntents,
+  getExpandedIntents,
 };

@@ -91,7 +91,7 @@ async function handleAIGate({ businessId, originalText, normalizedText, intentRe
   if (plan !== PLAN_PREMIUM) {
     console.log('[SubscriptionController] Plan Lite → devolviendo placeholder.');
     return {
-      text:       'respondiendo con redis',
+      text:       'Qué producto tienes en mente?',
       aiUsed:     false,
       ragContext: null,
       plan:       PLAN_LITE,

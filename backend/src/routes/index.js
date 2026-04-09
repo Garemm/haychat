@@ -10,12 +10,14 @@
 const { Router } = require('express');
 const messageRoutes  = require('./messageRoutes');
 const businessRoutes = require('./businessRoutes');
+const pedidoRoutes   = require('./pedidoRoutes');
 const { transcribe } = require('../controllers/transcribeController');
 
 const router = Router();
 
 router.use('/messages', messageRoutes);
 router.use('/business', businessRoutes);
+router.use('/pedidos',  pedidoRoutes);
 
 // ── Audio transcription (MediaRecorder fallback for mobile browsers) ──────
 router.post('/transcribe', transcribe);

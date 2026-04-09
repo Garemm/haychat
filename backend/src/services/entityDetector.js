@@ -36,9 +36,18 @@ const { extractAttribute, extractCompoundQuery, extractCategoryAttributeQuery, i
  * entity candidate. They can appear inside multi-word entity names (e.g. "tacos
  * de la casa") but alone they are meaningless and cause ILIKE '%una%' queries
  * that match every product description containing the Spanish article "una".
+ *
+ * Also includes standalone demonstrative / object pronouns that appear in
+ * purchase-pronoun phrases ("quiero uno", "quiero ese", "lo quiero") where the
+ * real product lives in context, not in the current message.
  */
 const BARE_ARTICLES = new Set([
-  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
+  // Definite / indefinite articles
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'uno',
+  // Demonstrative pronouns — standalone never a product name
+  'ese', 'esa', 'esos', 'esas', 'eso', 'esto', 'esta', 'estos', 'estas',
+  // Object pronouns
+  'lo',
 ]);
 
 const ENTITY_STOPWORDS = new Set([

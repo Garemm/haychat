@@ -6,8 +6,10 @@
  * PEDIDO MODEL — PostgreSQL queries for the purchase flow.
  *
  * Methods:
- *   getOrderStatus(businessId)  — Returns acepto_pedidos, phone, email.
- *   createPedido(data)          — Inserts a new pedido row.
+ *   getOrderStatus(businessId)          — Returns acepto_pedidos, phone, email.
+ *   createPedido(data)                  — Inserts a new pedido row.
+ *   getPedidoById(id)                   — Returns full pedido row.
+ *   updatePedido(id, fields)            — Admin updates status / notes.
  */
 
 const db = require('../config/database');
@@ -29,18 +31,64 @@ const PedidoModel = {
   },
 
   /**
-   * Inserts a new pedido and returns { id, fecha, aceptado }.
-   * @param {{ businessId: number, nombreCliente: string, telefono: string, detallePedido: string, horaRecogida: string }} data
+   * Inserts a new pedido and returns the full row.
+   * @param {{ businessId: number, sessionId: string, nombreCliente: string, telefono: string, detallePedido: string, horaRecogida: string }} data
    */
-  async createPedido({ businessId, nombreCliente, telefono, detallePedido, horaRecogida }) {
+  async createPedido({ businessId, sessionId, nombreCliente, telefono, detallePedido, horaRecogida }) {
     const result = await db.query(
       `INSERT INTO pedidos
-         (business_id, nombre_cliente, telefono, detalle_pedido, hora_recogida)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, fecha, aceptado`,
-      [businessId, nombreCliente, telefono, detallePedido, horaRecogida]
+         (business_id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida, fecha, aceptado, notas_admin`,
+      [businessId, sessionId ?? null, nombreCliente, telefono, detallePedido, horaRecogida]
     );
     return result.rows[0];
+  },
+
+  /**
+   * Returns the full pedido row by id, or null if not found.
+   * @param {number} id
+   */
+  async getPedidoById(id) {
+    const result = await db.query(
+      `SELECT id, business_id, session_id, nombre_cliente, telefono,
+              detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, created_at
+       FROM pedidos
+       WHERE id = $1`,
+      [id]
+    );
+    return result.rows[0] ?? null;
+  },
+
+  /**
+   * Admin updates status / notes on a pedido.
+   * Only columns explicitly provided are changed.
+   * @param {number} id
+   * @param {{ aceptado?: boolean, detallePedido?: string, horaRecogida?: string, notasAdmin?: string }} fields
+   * @returns {object|null} Updated row, or null if not found.
+   */
+  async updatePedido(id, { aceptado, detallePedido, horaRecogida, notasAdmin } = {}) {
+    const sets   = [];
+    const params = [];
+    let   idx    = 1;
+
+    if (aceptado      !== undefined) { sets.push(`aceptado = $${idx++}`);       params.push(aceptado); }
+    if (detallePedido !== undefined) { sets.push(`detalle_pedido = $${idx++}`); params.push(detallePedido); }
+    if (horaRecogida  !== undefined) { sets.push(`hora_recogida = $${idx++}`);  params.push(horaRecogida); }
+    if (notasAdmin    !== undefined) { sets.push(`notas_admin = $${idx++}`);    params.push(notasAdmin); }
+
+    if (sets.length === 0) return null;
+
+    params.push(id);
+    const result = await db.query(
+      `UPDATE pedidos
+       SET ${sets.join(', ')}
+       WHERE id = $${idx}
+       RETURNING id, business_id, session_id, nombre_cliente, telefono,
+                 detalle_pedido, hora_recogida, fecha, aceptado, notas_admin`,
+      params
+    );
+    return result.rows[0] ?? null;
   },
 };
 

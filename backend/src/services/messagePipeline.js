@@ -76,6 +76,30 @@ const COMPRAR_GENUINELY_STANDALONE = [
   'tienda en linea', 'quiero pedirlo',
 ];
 
+/**
+ * Regex patterns that signal "I want to buy the PREVIOUSLY mentioned product".
+ * These are pronoun-based purchase phrases — they don't name a product;
+ * they refer anaphorically to the product confirmed in context.
+ *
+ * All patterns are tested on already-normalised text (accents stripped, lowercase).
+ * Rule 4.9 in decide() uses these to route to 'comprar_context' before
+ * extractFollowUpEntity() can misinterpret the phrase as a product name.
+ */
+const COMPRAR_PRONOUN_PATTERNS = [
+  /\bme\s+gustaria\b/,                         // "me gustaria pedir una"
+  /\bquisiera\b/,                               // "quisiera pedirlo"
+  /\bme\s+l[ao]\s+llevo\b/,                    // "me lo/la llevo"
+  /\bl[ao]\s+quiero\b/,                         // "lo/la quiero"
+  /\bquiero\s+(?:un[oa]|ese|esa)\b/,           // "quiero una" / "quiero ese"
+  /\bdame(?:lo|la|me)?\s*(?:un[oa])?\b/,       // "damelo" / "dame una"
+  /\bdeme\s+(?:un[oa])\b/,                      // "deme uno/una"
+  /\bvoy\s+a\s+compr[ao]r(?:lo|la)?\b/,       // "voy a comprarlo"
+  /\bcompr[ao]r(?:lo|la)\b/,                   // "comprarlo" / "comprarla"
+  /\bpedir(?:lo|la)\b/,                         // "pedirlo" / "pedirla"
+  /\bl[ao]\s+pido\b/,                           // "lo pido" / "la pido"
+  /\bme\s+lo\s+das\b|\bme\s+la\s+das\b/,      // "me lo das" / "me la das"
+];
+
 // ─── Pagination / category navigation helpers ─────────────────────────────────
 
 /** Patterns that mean "show me next page". */
@@ -384,6 +408,16 @@ function extractFollowUpEntity(normalizedText, lastEntity) {
     'si', 'no', 'ok', 'ya', 'hola', 'gracias', 'buenas', 'saludos',
     // Follow-up trigger words — excluded so Shape 2 doesn't include them in the entity
     'tambien', 'igual', 'otro', 'otra', 'tb', 'tmb',
+    // Purchase-action verbs — these signal intent to BUY, never appear as product names.
+    // Without this guard, "me gustaria pedir una" would be extracted as a product name.
+    'pedir', 'ordenar', 'comprar', 'adquirir',
+    // Modal desire words — similarly anaphoric, never product names
+    'gustaria', 'quisiera',
+    // Reflexive purchase tokens
+    'llevarme', 'quedarme',
+    // Copula verb forms — "es natural?", "están frescos?" are yes/no questions about the
+    // current context product, not product-name candidates.
+    'es', 'estan',
   ]);
   const tokens = normalizedText.split(/\s+/);
   // Allow leading articles in the token count — they'll be stripped after the check.
@@ -535,6 +569,29 @@ function decide(intentResult, entityResult, context, normalizedText) {
     };
   }
 
+  // Rule 0b: Purchase-pronoun + confirmed context product beats high-confidence
+  // standalone 'comprar' routing. Phrases like "quiero una", "quiero ese",
+  // "lo quiero" score as comprar at weight 3 (highConfidence=true) and would
+  // fire Rule 1 BEFORE Rule 4.9 can intercept them. Pre-empt Rule 1 here so
+  // the purchase form is shown for the confirmed product instead of generic
+  // comprar info.
+  if (
+    !hasEntity &&
+    intentResult.intent === 'comprar' &&
+    context.lastEntity?.type === 'product' &&
+    context.lastEntity?.value &&
+    context.lastEntityFound !== false &&
+    COMPRAR_PRONOUN_PATTERNS.some((p) => p.test(normalizedText))
+  ) {
+    return {
+      strategy:    'comprar_context',
+      intent:      'comprar',
+      entity:      { type: context.lastEntity.type, value: context.lastEntity.value },
+      usedContext: true,
+      reason:      `purchase pronoun + confirmed product "${context.lastEntity.value}" [pre-Rule1]`,
+    };
+  }
+
   // Rule 1: High-confidence standalone intent → use intent alone, ignore everything
   if (hasIntent && standalone && highConfidence) {
     return {
@@ -671,6 +728,27 @@ function decide(intentResult, entityResult, context, normalizedText) {
     }
   }
 
+  // Rule 4.6: "es [adjective]?" / "están [adjective]?" — yes/no description question
+  // about the confirmed context product. "¿Es natural?", "¿Es picante?", "¿Es vegano?"
+  // are attribute questions about the product just presented, NOT product-name searches.
+  // Fires before Rule 5 so "es natural" is never extracted as a product-name candidate.
+  const COPULA_ADJ_RE = /^(?:es|estan)\s+[\wñ]/;
+  if (
+    !hasEntity &&
+    COPULA_ADJ_RE.test(normalizedText) &&
+    context.lastEntity?.type === 'product' &&
+    context.lastEntity?.value &&
+    context.lastEntityFound !== false
+  ) {
+    return {
+      strategy:    'context',
+      intent:      'descripcion',
+      entity:      { type: context.lastEntity.type, value: context.lastEntity.value },
+      usedContext: true,
+      reason:      `yes/no adjective question about context product "${context.lastEntity.value}"`,
+    };
+  }
+
   // Rule 4.8: "con X" attribute follow-up in product context.
   // "y una con queso" after context { type: "product", value: "hamburguesa" }
   // → compound search: hamburguesas that CONTAIN queso.
@@ -705,6 +783,32 @@ function decide(intentResult, entityResult, context, normalizedText) {
         reason: `attribute follow-up: "${entityBase}" con "${attrWord}"`,
       };
     }
+  }
+
+  // Rule 4.9: Purchase pronoun after a confirmed context product.
+  // Phrases like "me gustaria pedir una", "lo quiero", "dame una", "me lo llevo"
+  // refer anaphorically to the product confirmed in the previous turn.
+  // Must fire BEFORE Rule 5 so extractFollowUpEntity never processes them as
+  // product names (which would cause a failed DB lookup with garbage text).
+  //
+  // Conditions:
+  //   – No entity was detected directly in the current message
+  //   – The message contains a purchase-pronoun signal
+  //   – Context has a confirmed product (lastEntityFound !== false)
+  if (
+    !hasEntity &&
+    context.lastEntity?.type === 'product' &&
+    context.lastEntity?.value &&
+    context.lastEntityFound !== false &&
+    COMPRAR_PRONOUN_PATTERNS.some((p) => p.test(normalizedText))
+  ) {
+    return {
+      strategy:   'comprar_context',
+      intent:     'comprar',
+      entity:     { type: context.lastEntity.type, value: context.lastEntity.value },
+      usedContext: true,
+      reason:     `purchase pronoun referring to confirmed product "${context.lastEntity.value}"`,
+    };
   }
 
   // Rule 5: Check for follow-up entity ("¿Y pizza mexicana?", "tambien X", bare noun)
@@ -1198,6 +1302,14 @@ async function executeDecision(decision, originalText, normalizedText, businessI
     }
   }
 
+  // comprar_context: purchase pronoun referencing the confirmed context product.
+  // chatSocket.js checks this signal and triggers the purchase form (or contact info).
+  // The text here acts as a brief acknowledgment while the form loads.
+  if (decision.strategy === 'comprar_context') {
+    const productName = decision.entity?.value ?? 'ese producto';
+    return `¡Perfecto! 😊 Enseguida te ayudo con tu pedido de ${productName}.`;
+  }
+
   // Post-result pronoun purchase phrase after a failed product lookup:
   // user said something like "quiero una" / "me lo llevo" referring to a product
   // that doesn't exist in the catalog.
@@ -1483,11 +1595,16 @@ async function processMessage({ text, sessionId, businessId }) {
     contextUpdate = decision._ctxOverride;
   } else {
     contextUpdate = buildContextUpdate(decision);
-    // entity strategy: _rows comes directly from detectEntities
+    // entity strategy: _rows comes directly from detectEntities.
+    // Also guard with reply text: executeDecision may find the product via a
+    // compound/fuzzy fallback (queryProductsCompoundAware) even when _rows is
+    // empty. In that case the reply is positive, so we must NOT mark it as missed.
     const entityMissedViaDirect =
       decision.strategy === 'entity' &&
       decision.entity?.type === 'product' &&
-      entityResult._rows?.length === 0;
+      entityResult._rows?.length === 0 &&
+      typeof replyText === 'string' &&
+      replyText.toLowerCase().includes('no encontr');
     // followup / context strategies: entity came from context/follow-up logic,
     // not from detectEntities, so _rows is undefined. Infer miss from reply text.
     // Both formatProductResponse and formatDescripcionResponse emit a variant:

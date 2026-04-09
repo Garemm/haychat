@@ -218,9 +218,9 @@ const initSocket = (httpServer) => {
         // 3. Process through NLP pipeline
         // Signal to all room members that the bot is working on a response
         io.to(roomId).emit('user_typing', { sender: 'Bot' });
-        let replyText;
+        let replyText, pipelineDecision;
         try {
-          ({ replyText } = await processMessage({ text, sessionId, businessId }));
+          ({ replyText, decision: pipelineDecision } = await processMessage({ text, sessionId, businessId }));
         } finally {
           io.to(roomId).emit('user_stop_typing', { sender: 'Bot' });
         }
@@ -245,6 +245,25 @@ const initSocket = (httpServer) => {
           text:      replyText,
           timestamp: botTimestamp,
         });
+
+        // 6a. If pipeline detected a purchase-pronoun referencing a confirmed context product,
+        //     check acepto_pedidos and trigger the purchase form (or contact info).
+        if (pipelineDecision?.strategy === 'comprar_context' && pipelineDecision.entity?.value) {
+          try {
+            const info = await PedidoModel.getOrderStatus(businessId);
+            if (info?.acepto_pedidos) {
+              socket.emit('mostrar_formulario_pedido', { businessId });
+            } else {
+              socket.emit('info_contacto', {
+                mensaje:  `Me alegra tu interés en "${pipelineDecision.entity.value}". En este momento no aceptamos pedidos en línea. Puedes contactarnos:`,
+                telefono: info?.phone ?? null,
+                email:    info?.email ?? null,
+              });
+            }
+          } catch (err) {
+            console.error('[Socket] comprar_context trigger error:', err.message);
+          }
+        }
 
         // 6. Reset idle timer — clock starts from the last bot reply
         resetIdleTimer(sessionId, roomId, businessId);
@@ -296,9 +315,11 @@ const initSocket = (httpServer) => {
 
     // ── Enviar pedido ────────────────────────────────────────────────────────
     // Client emits this when the user submits the order form.
-    // Server validates, inserts into DB, and emits 'pedido_confirmado'.
+    // Server validates, inserts into DB, and emits 'pedido_confirmado' with
+    // the full pedido data so the frontend can display a persistent receipt card.
     socket.on('enviar_pedido', async ({
       businessId,
+      sessionId,
       nombreCliente,
       telefono,
       detallePedido,
@@ -345,19 +366,26 @@ const initSocket = (httpServer) => {
       try {
         const pedido = await PedidoModel.createPedido({
           businessId,
+          sessionId:     sessionId ?? null,
           nombreCliente: nombreCliente.trim(),
           telefono:      telefono.trim(),
           detallePedido: detallePedido.trim(),
           horaRecogida:  horaRecogida.trim(),
         });
 
+        // Emit the full pedido row so the client can display a persistent receipt card.
         socket.emit('pedido_confirmado', {
-          id:     pedido.id,
-          fecha:  pedido.fecha,
-          mensaje: `¡Tu pedido #${pedido.id} fue recibido exitosamente! Te contactaremos pronto. 🎉`,
+          id:            pedido.id,
+          fecha:         pedido.fecha,
+          aceptado:      pedido.aceptado,
+          nombreCliente: pedido.nombre_cliente,
+          telefono:      pedido.telefono,
+          detallePedido: pedido.detalle_pedido,
+          horaRecogida:  pedido.hora_recogida,
+          notasAdmin:    pedido.notas_admin ?? null,
         });
       } catch (err) {
-        console.error('[Socket] enviar_pedido error:', err.message);
+        console.error('[Socket] enviar_pedido error:', err.message, err.stack?.split('\n')[1] ?? '');
         socket.emit('pedido_error', { message: 'Error al registrar el pedido. Por favor intenta de nuevo.' });
       }
     });
