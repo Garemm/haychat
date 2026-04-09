@@ -333,16 +333,31 @@ const BusinessModel = {
   },
 
   /**
-   * Returns all registered businesses (id, name, type, city).
+   * Returns all registered businesses (id, chat_uuid, name, type, city).
    * Used by the frontend BusinessSelector to populate the selection screen.
    */
   async getAllBusinesses() {
     const result = await db.query(
-      `SELECT id, name, category, city
+      `SELECT id, chat_uuid, name, category, city
        FROM businesses
        ORDER BY id ASC`
     );
     return result.rows;
+  },
+
+  /**
+   * Looks up a business by its public chat_uuid.
+   * @param {string} chatUuid
+   * @returns {Promise<{id, name, city}|null>}
+   */
+  async getByUuid(chatUuid) {
+    const result = await db.query(
+      `SELECT id, name, city
+       FROM businesses
+       WHERE chat_uuid = $1`,
+      [chatUuid]
+    );
+    return result.rows[0] ?? null;
   },
 
   /**

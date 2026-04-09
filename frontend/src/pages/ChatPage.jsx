@@ -103,28 +103,34 @@ const ChatContent = ({ businessName }) => {
 };
 
 const ChatPage = () => {
-  const { businessId } = useParams();
-  const { state }      = useLocation();
-  const bizId          = parseInt(businessId, 10);
+  const { chatUuid } = useParams();
+  const { state }    = useLocation();
 
+  const [bizId,        setBizId]        = useState(null);
   const [businessName, setBusinessName] = useState(state?.name || '');
-  const [loadingName, setLoadingName]   = useState(!state?.name);
+  const [loading,      setLoading]      = useState(true);
+  const [notFound,     setNotFound]     = useState(false);
 
-  // If the user lands directly on the URL (no router state), fetch the name
   useEffect(() => {
-    if (state?.name || !bizId) return;
-    fetch('/api/business')
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then(({ data }) => {
-        const match = data.find((b) => b.id === bizId);
-        if (match) setBusinessName(match.name);
+    fetch(`/api/business/by-uuid/${encodeURIComponent(chatUuid)}`)
+      .then((r) => {
+        if (r.status === 404) { setNotFound(true); return null; }
+        if (!r.ok) throw new Error('Error al obtener negocio');
+        return r.json();
       })
-      .catch(() => {})
-      .finally(() => setLoadingName(false));
-  }, [bizId, state?.name]);
+      .then((json) => {
+        if (!json) return;
+        setBizId(json.data.id);
+        if (!businessName) setBusinessName(json.data.name);
+      })
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatUuid]);
 
-  if (!bizId || isNaN(bizId)) return <Navigate to="/" replace />;
-  if (loadingName) return null; // brief flash while fetching name
+  if (!chatUuid) return <Navigate to="/" replace />;
+  if (loading)   return null;
+  if (notFound)  return <Navigate to="/" replace />;
 
   return (
     <ChatProvider businessId={bizId} businessName={businessName}>
