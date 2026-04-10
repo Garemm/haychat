@@ -185,8 +185,13 @@ function isAttributeQuery(normalizedText) {
   if (ATTRIBUTE_TRIGGER_RE.test(normalizedText)) return true;
 
   // Class 2a: "NOUN para NOUN" structural pattern
-  // Matches when "para" is preceded AND followed by a word (not at sentence start)
-  if (/\w+\s+para\s+\w/.test(normalizedText)) return true;
+  // Only fires when the "para" phrase appears at or near the START of the sentence
+  // (after optional short lead-in words). This prevents false positives when "para"
+  // is embedded inside a longer price/info query about a service or product whose
+  // NAME contains "para" — e.g. "que precio tiene la renta de salon para eventos"
+  // should NOT be treated as an attribute query for "eventos".
+  // Anchor: the para-phrase must be within the first ~4 tokens.
+  if (/^(?:(?:busco|quiero|necesito|hay|tiene[sn]?|tienen|dame)\s+)?(?:[\wñ]+\s+){0,2}[\wñ]+\s+para\s+\w/.test(normalizedText)) return true;
 
   // Class 2b: "de NUMBER UNIT" measure pattern ("de 2 metros", "de 10 mm")
   if (/\bde\s+\d+(?:[.,]\d+)?\s+\w/.test(normalizedText)) return true;
@@ -276,10 +281,21 @@ function extractCompoundQuery(message) {
   // Strip leading trigger words and optional article to expose the core phrase
   const stripped = text.replace(COMPOUND_TRIGGER_STRIP_RE, '').trim();
 
-  // Match: 1-3 entity words + "de" + 1-3 attribute words, with optional trailing "?"
-  const match = stripped.match(
+  // Try "entity DE attribute" first (e.g. "tornillos de madera", "carne de res")
+  let match = stripped.match(
     /^(?<entity>[\wñ]+(?:\s+[\wñ]+){0,2})\s+de\s+(?<attribute>[\wñ]+(?:\s+[\wñ]+){0,3})\s*\??$/
   );
+  let separator = 'de';
+
+  // Fallback: "entity CON attribute" — explicit product + ingredient/feature
+  // e.g. "hamburguesa con queso", "pizza con extra queso", "agua con gas"
+  // Only when the "de" pattern does not match, to avoid false positives.
+  if (!match?.groups) {
+    match = stripped.match(
+      /^(?<entity>[\wñ]+(?:\s+[\wñ]+){0,2})\s+con\s+(?<attribute>[\wñ]+(?:\s+[\wñ]+){0,3})\s*\??$/
+    );
+    separator = 'con';
+  }
 
   if (!match?.groups) return null;
 
@@ -295,7 +311,7 @@ function extractCompoundQuery(message) {
   // Attribute must not be a numeric measure — those go through the existing measure path
   if (isMeasure(attribute)) return null;
 
-  const fullPhrase = `${entity} de ${attribute}`;
+  const fullPhrase = `${entity} ${separator} ${attribute}`;
   return { entity, attribute, fullPhrase };
 }
 

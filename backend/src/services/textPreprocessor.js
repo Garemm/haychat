@@ -409,6 +409,27 @@ function singularizeTokens(text) {
     .join(' ');
 }
 
+// ─── Leading connector stripping ───────────────────────────────────────────────
+
+/**
+ * Casual connectors at the start of a message carry no semantic value for NLP
+ * but break entity/attribute extraction patterns.
+ * e.g. "pero hamburguesa con queso" → "hamburguesa con queso"
+ *      "aunque tienes tacos?" → "tienes tacos?"
+ */
+const LEADING_CONNECTOR_RE = /^(?:y|pero|aunque|pues(?:\s+bien)?|o\s+sea|oye|vaya)\s+/;
+
+/**
+ * Strips a leading casual connector token (if present) from an already-
+ * normalized (lowercase, no-accent) string.
+ *
+ * @param {string} text  Normalized text
+ * @returns {string}
+ */
+function stripLeadingConnector(text) {
+  return text.replace(LEADING_CONNECTOR_RE, '').trim();
+}
+
 // ─── Full preprocessing pipeline ─────────────────────────────────────────────
 
 /**
@@ -417,6 +438,7 @@ function singularizeTokens(text) {
  * Runs BEFORE intent detection and entity extraction.
  * The output is a clean, normalized string that:
  *   - Has no accents, no punctuation, no inverted chars
+ *   - Has leading casual connectors stripped ("pero" → "")
  *   - Has abbreviations expanded ("xq" → "porque")
  *   - Has common typos corrected ("ora" → "hora")
  *
@@ -433,8 +455,9 @@ function singularizeTokens(text) {
 function preprocessMessage(text, { products = [], categories = [] } = {}) {
   const normalized = normalize(text);
   const expanded   = expandAbbreviations(normalized);
+  const stripped   = stripLeadingConnector(expanded);
   const validSet   = buildValidSet(products, categories);
-  return correctTypos(expanded, validSet);
+  return correctTypos(stripped, validSet);
 }
 
 module.exports = {
@@ -445,8 +468,10 @@ module.exports = {
   singularizeTokens,
   buildValidSet,
   levenshtein,
+  stripLeadingConnector,
   ABBREVIATIONS,
   TYPO_DICT,
   CORRECT_WORDS,
   SINGULARIZE_STOPWORDS,
+  LEADING_CONNECTOR_RE,
 };

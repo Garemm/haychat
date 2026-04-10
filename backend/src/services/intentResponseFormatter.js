@@ -133,10 +133,21 @@ const FORMATTERS = {
     if (row.phone)        contactParts.push(`llámanos al ${row.phone}`);
     if (row.email)        contactParts.push(`escríbenos a ${row.email}`);
     if (row.webpage_link) contactParts.push(`visita nuestro sitio en ${row.webpage_link}`);
-    if (contactParts.length > 0) {
-      return `😊 Puedes contactarnos directamente: ${enumList(contactParts)}. ¿Hay algo más en lo que te pueda ayudar?`;
+
+    const contactStr = contactParts.length > 0
+      ? `contactarnos directamente: ${enumList(contactParts)}`
+      : (row.city ? `visitarnos en ${row.city}` : null);
+
+    if (row.acepto_pedidos) {
+      // Orders enabled: invite them to use the order button AND contact
+      const suffix = contactStr ? ` o ${contactStr}` : '';
+      return `😊 Puedes enviar tu orden dando click al botón "Hacer pedido"${suffix}. ¿Hay algo más en lo que te pueda ayudar?`;
     }
-    if (row.city) return `😊 Puedes visitarnos en ${row.city}. ¿Hay algo más en lo que te pueda ayudar?`;
+
+    // Orders disabled: contact-only message
+    if (contactStr) {
+      return `😊 Puedes ${contactStr}. ¿Hay algo más en lo que te pueda ayudar?`;
+    }
     return '😊 Con gusto te ayudo. Contáctanos directamente para realizar tu pedido. ¿Hay algo más en lo que te pueda ayudar?';
   },
 

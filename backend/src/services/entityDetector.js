@@ -407,6 +407,35 @@ async function queryPromotions(entity, businessId) {
   return result.rows;
 }
 
+/**
+ * Searches business_services by ILIKE on name and description.
+ * Also tries each word of a multi-word candidate so "servicio a domicilio"
+ * matches a service simply named "Domicilio" or "Entrega a domicilio".
+ *
+ * @param {string} entity
+ * @param {number} businessId
+ * @returns {Promise<Array>}
+ */
+async function queryServices(entity, businessId) {
+  // Build a list of variants: full phrase + individual meaningful words (len > 2)
+  const words = entity.split(/\s+/).filter((w) => w.length > 2);
+  const variants = [...new Set([entity, ...words])];
+
+  for (const v of variants) {
+    const result = await db.query(
+      `SELECT id, name, description, price
+       FROM business_services
+       WHERE business_id = $1
+         AND (name ILIKE $2 OR description ILIKE $2)
+       ORDER BY name ASC
+       LIMIT 5`,
+      [businessId, `%${v}%`]
+    );
+    if (result.rows.length > 0) return result.rows;
+  }
+  return [];
+}
+
 // ─── Entity type classification ───────────────────────────────────────────────
 
 /**
@@ -458,16 +487,37 @@ async function detectEntities(message, businessId, intentResult = { intent: null
   }
 
   // Guard: skip compound detection when the message starts with an
-  // existence-question verb (tiene / tienes / tienen).  In those messages the
-  // full phrase after the verb is the PRODUCT NAME, not a compound type+attr
+  // existence-question verb (tiene / tienes / tienen / hay).  In those messages
+  // the full phrase after the verb is the PRODUCT NAME, not a compound type+attr
   // query.  e.g. "tienen agua de limon" → entity="agua de limon" (product),
   // NOT compound entity="agua" + attribute="limon".
+  // Similarly "tienes hamburguesa con queso?" → entity="hamburguesa con queso"
+  // (product search), not compound entity="hamburguesa" + attribute="queso".
   // Note: "tiene algo con carne de res" is NOT guarded (extractAttribute fires
   // first) and its embedded compound is promoted via the inner-compound check.
-  const skipCompound = /^tiene[sn]?\s/.test(normalizedText);
+  const skipCompound = /^(?:tiene[sn]?|hay)\s/.test(normalizedText);
   const compoundExtracted = skipCompound ? null : extractCompoundQuery(normalizedText);
   if (compoundExtracted) {
     const attrType = isMaterial(compoundExtracted.attribute) ? 'material' : 'feature';
+    // Check if the entity part resolves to a category → use category+attribute path
+    // so the pipeline searches within that category for products with the attribute,
+    // instead of doing a raw compound product search.
+    // e.g. "bebida de chocolate" → entity="bebida" is a category → categoryTerm set
+    try {
+      const catRows = await queryCategories(compoundExtracted.entity, businessId);
+      if (catRows.length > 0) {
+        return {
+          ...empty,
+          type: 'attribute',
+          value: compoundExtracted.fullPhrase,
+          categoryTerm: compoundExtracted.entity,
+          attributeTerm: compoundExtracted.attribute,
+          attributeType: attrType,
+        };
+      }
+    } catch (err) {
+      console.error('[EntityDetector] Error querying categories for compound entity:', err.message);
+    }
     return {
       ...empty,
       type: 'attribute',
@@ -596,6 +646,64 @@ async function detectEntities(message, businessId, intentResult = { intent: null
 
   if (!candidate) return empty;
 
+  // ── "entity CON attribute" candidate resolution ───────────────────────────
+  // When the regex extracted a phrase containing "con" (e.g. "bebida con chocolate"),
+  // check whether the part BEFORE "con" is a category (or its singular/plural form).
+  // If it resolves to a category, return an attribute result so the pipeline
+  // searches products in that category that have the given attribute — giving
+  // "bebidas con chocolate" rather than a raw product full-text search.
+  // Falls through to normal product/category search only when no category matches.
+  if (candidate.includes(' con ')) {
+    const conIdx = candidate.indexOf(' con ');
+    const entityPart = candidate.slice(0, conIdx).trim();
+    const attrPart   = candidate.slice(conIdx + 5).trim();
+    if (entityPart.length >= 2 && attrPart.length >= 2) {
+      try {
+        const catRows = await queryCategories(entityPart, businessId);
+        if (catRows.length > 0) {
+          return {
+            ...empty,
+            type: 'attribute',
+            value: `${entityPart} con ${attrPart}`,
+            categoryTerm: entityPart,
+            attributeTerm: attrPart,
+            attributeType: 'feature',
+          };
+        }
+      } catch (err) {
+        console.error('[EntityDetector] Error querying categories for entity-con-attr:', err.message);
+      }
+      // Category not found — try exact product match with full "entity con attr" before
+      // falling back to the broad product search below.
+      try {
+        const exactRows = await queryProducts(candidate, businessId);
+        if (exactRows.length > 0) {
+          return { ...empty, product: candidate, type: 'product', value: candidate, _rows: exactRows };
+        }
+      } catch (err) {
+        console.error('[EntityDetector] Error querying products for entity-con-attr:', err.message);
+      }
+      // If neither category nor exact product found, try the entity part alone as a product
+      try {
+        const entityRows = await queryProducts(entityPart, businessId);
+        if (entityRows.length > 0) {
+          // Return attribute so the pipeline filters by both entity + attribute
+          return {
+            ...empty,
+            type: 'attribute',
+            value: `${entityPart} con ${attrPart}`,
+            categoryTerm: null,
+            entityTerm: entityPart,
+            attributeTerm: attrPart,
+            attributeType: 'feature',
+          };
+        }
+      } catch (err) {
+        console.error('[EntityDetector] Error querying products for entity part:', err.message);
+      }
+    }
+  }
+
   // Try product first (most common case)
   try {
     const productRows = await queryProducts(candidate, businessId);
@@ -624,6 +732,18 @@ async function detectEntities(message, businessId, intentResult = { intent: null
     }
   } catch (err) {
     console.error('[EntityDetector] Error querying promotions:', err.message);
+  }
+
+  // Try service — checked last so product/category/promotion take priority.
+  // Handles queries like "tiene servicio a domicilio?" where the candidate is
+  // not a product but resolves to a business service.
+  try {
+    const serviceRows = await queryServices(candidate, businessId);
+    if (serviceRows.length > 0) {
+      return { ...empty, type: 'service', value: candidate, _serviceRows: serviceRows };
+    }
+  } catch (err) {
+    console.error('[EntityDetector] Error querying services:', err.message);
   }
 
   // Candidate found in text but no DB match — still return candidate as product attempt
@@ -706,6 +826,7 @@ module.exports = {
   queryProducts,
   queryCategories,
   queryPromotions,
+  queryServices,
   formatProductResponse,
   formatCategoryResponse,
   // Exported for testing

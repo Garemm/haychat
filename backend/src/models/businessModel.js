@@ -245,7 +245,8 @@ const BusinessModel = {
          city,
          webpage_link,
          phone,
-         email
+         email,
+         acepto_pedidos
        FROM businesses
        WHERE id = $1`,
       [businessId]

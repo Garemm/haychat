@@ -24,7 +24,7 @@ function getMockOpenAIResponse(userMessage, context = null) {
   // Si hay contexto previo, generar una respuesta coherente con él
   if (context?.lastProduct) {
     return (
-      `🤖 No entendí muy bien lo que quisieras saber sobre *${context.lastProduct}*. ` +
+      `No entendí muy bien lo que quisieras saber sobre ${context.lastProduct}. ` +
       `¿Te puedo ayudar con su precio, disponibilidad o descripción?`
     );
   }
@@ -40,14 +40,14 @@ function getMockOpenAIResponse(userMessage, context = null) {
     };
     const tema = temas[context.lastIntent] || context.lastIntent;
     return (
-      `🤖 ¡Claro! Puedo contarte más sobre ${tema}. ` +
+      `¡Claro! Puedo contarte más sobre ${tema}. ` +
       `¿Tienes alguna pregunta específica?`
     );
   }
 
   // Sin contexto → respuesta genérica orientada a las capacidades del bot
   return (
-    `🤖 No estoy seguro de lo que buscas, ¡pero con gusto te ayudo! 😊 Puedo orientarte sobre:\n` +
+    `No estoy seguro de lo que buscas, ¡pero con gusto te ayudo! 😊 Puedo orientarte sobre:\n` +
     `  • Horarios de atención\n` +
     `  • Productos disponibles\n` +
     `  • Precios\n` +

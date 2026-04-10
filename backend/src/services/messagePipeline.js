@@ -48,7 +48,7 @@ const { getMockOpenAIResponse, getRAGOpenAIResponse } = require('../temp/mockOpe
 const { generateOllamaResponse } = require('./ollamaService');
 const { shouldUseAI, hasRelevantData } = require('./aiDecisionEngine');
 const { filterRelevantData } = require('./ragFilterService');
-const { handleAIGate } = require('./subscriptionController');
+const { handleAIGate, getSubscriptionPlan, PLAN_PREMIUM } = require('./subscriptionController');
 const { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } = require('./attributeSearchService');
 const { extractAttribute } = require('./attributeExtractor');
 
@@ -239,6 +239,10 @@ function extractServiceQuery(normalizedText) {
     // Explicit "servicio de X" / "servicio X"
     /\bservicios?\s+de\s+(.+?)(?:\?|$)/,
     /\bservicios?\s+(.+?)(?:\?|$)/,
+    // Price/cost queries about a service: "que precio tiene la renta de salon para eventos"
+    /\bque\s+(?:precio|costo|valor|tarifa|cuesta|cobran?)\s+(?:tiene[ns]?|es|cobran?|hay)?\s*(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
+    // "cuanto cuesta/vale/cobran [por] X"
+    /\bcuanto\s+(?:cuesta[n]?|vale[n]?|cobran?(?:\s+por)?)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
     // Description queries about a service: "que incluye/contiene/trae/lleva/es X"
     // Strip the verb phrase to get just the service-name portion.
     /\bque\s+(?:incluye[n]?|contiene[n]?|trae[n]?|lleva[n]?|es|son)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
@@ -484,9 +488,12 @@ function decide(intentResult, entityResult, context, normalizedText) {
   }
 
   // Rule -1c: Still in category_selection state but no match → re-prompt with list
-  // Exception: if the user sends a standalone intent (e.g. "que servicios tienen"),
-  // let it through so the pipeline handles it normally.
-  if (context.lastIntent === 'category_selection' && context.availableCategories?.length > 0 && !(hasIntent && standalone)) {
+  // Exceptions:
+  //   1. Standalone intent (e.g. "que servicios tienen") — let through normally.
+  //   2. Attribute entity detected (e.g. "tiene algo con pollo?") — skip re-prompt
+  //      so the attribute search path handles it directly instead of looping.
+  const isAttributeEntity = entityResult.type === 'attribute';
+  if (context.lastIntent === 'category_selection' && context.availableCategories?.length > 0 && !(hasIntent && standalone) && !isAttributeEntity) {
     return {
       strategy: 'category_reprompt',
       intent: null,
@@ -541,7 +548,7 @@ function decide(intentResult, entityResult, context, normalizedText) {
   //   - message is not purely ambiguous and has enough text to match against
   if (
     context.lastIntent === 'servicios' &&
-    entityResult.type !== 'product' &&
+    !(entityResult.type === 'product' && entityResult._rows?.length > 0) &&
     entityResult.type !== 'category' &&
     !(hasIntent && standalone) &&
     !(intentResult.intent === 'productos' && highConfidence) &&
@@ -635,6 +642,17 @@ function decide(intentResult, entityResult, context, normalizedText) {
       },
       usedContext: false,
       reason: `attribute detected: "${entityResult.value}" (${entityResult.attributeType})`,
+    };
+  }
+
+  // Rule 1.8: Service entity detected → route directly to servicios handler
+  if (entityResult.type === 'service') {
+    return {
+      strategy: 'entity',
+      intent: 'servicios',
+      entity: { type: 'service', value: entityResult.value },
+      usedContext: false,
+      reason: `service entity detected: "${entityResult.value}"`,
     };
   }
 
@@ -1421,6 +1439,16 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
     return { text: fallback, aiUsed: false, ragContext };
   }
 
+  // Step 4b: Subscription gate — Ollama (llama3) only for plan Premium (subscription_id = 2)
+  const plan = await getSubscriptionPlan(businessId);
+  if (plan !== PLAN_PREMIUM) {
+    const fallback = getMockOpenAIResponse(originalText, {
+      lastProduct: context?.lastEntity?.value ?? null,
+      lastIntent: context?.lastIntent ?? null,
+    });
+    return { text: fallback, aiUsed: false, ragContext };
+  }
+
   // Step 5: Ollama LLM with business context + RAG data
   const ollamaText = await generateOllamaResponse(
     originalText,
@@ -1470,7 +1498,15 @@ async function processMessage({ text, sessionId, businessId }) {
 
   // 5b. Attribute follow-up: combine new attribute with previous search context
   // e.g. "algo con queso" → "y con pollo" → combine [queso, pollo]
+  //
+  // Guard: skip combination when the current message is a fresh standalone query.
+  // "tiene algo con pollo?" / "hay algo con pollo?" start a brand-new search
+  // and must NOT be merged with the prior attribute context.
+  // Only short follow-up forms like "y con pollo", "con queso", "tambien con jalapeño"
+  // should accumulate attributes.
+  const FRESH_ATTR_QUERY_RE = /\b(?:algo|alguna?|alguno?|productos?|hay|tienes?|tienen|busco|necesito)\b/;
   if (
+    !FRESH_ATTR_QUERY_RE.test(normalizedText) &&
     entityResult.type === 'attribute' &&
     context.lastEntity?.type === 'attribute' &&
     Array.isArray(context.lastAttributes) &&

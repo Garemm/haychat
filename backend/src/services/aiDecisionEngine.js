@@ -87,8 +87,19 @@ function shouldUseAI(normalizedText, intentResult, entityResult, context) {
 
   // Ingredient/content descriptive questions: "la quesadilla tiene queso?", "lleva carne?", "contiene gluten?"
   // These are yes/no descriptive questions about a product, not catalog searches.
+  // Ingredient/content descriptive questions: "la quesadilla tiene queso?", "lleva carne?", "contiene gluten?"
+  // These are yes/no descriptive questions about a product, not catalog searches.
+  //
+  // Guard: if the availability verb is at the START or END of the message, it is an
+  // availability/catalog query — NOT an ingredient question — skip AI routing.
+  //   START: "tienes hamburguesas?"       → availability
+  //   END:   "que tipos de hamburguesa tiene?" → catalog  (verb trails after entity)
+  //   END:   "que hamburguesas tienen?"   → catalog
+  // In contrast, "la quesadilla tiene queso?" has "tiene" in the MIDDLE (not at start/end),
+  // so it is correctly treated as an ingredient description and routed to AI.
   const PRODUCT_DESC_RE = /\b(?:tiene[ns]?|lleva[ns]?|contiene[ns]?|incluye[ns]?|trae[ns]?|viene[ns]?\s+con|es\s+con|viene\s+con)\b/;
-  if (PRODUCT_DESC_RE.test(normalizedText)) {
+  const AVAIL_VERB_RE   = /^(?:tienes?|tienen|hay)\s+|(?:tiene[sn]?|tienen|hay)\s*\??$/;
+  if (!AVAIL_VERB_RE.test(normalizedText) && PRODUCT_DESC_RE.test(normalizedText)) {
     return { routing: 'ai', reason: 'product description/ingredient question', aiCategory: 'open_query' };
   }
 

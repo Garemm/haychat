@@ -28,7 +28,7 @@ const env = {
 
   // ── Ollama (local LLM fallback) ──────────────────────────────────────────
   OLLAMA_URL:        process.env.OLLAMA_URL        || 'http://localhost:11434',
-  OLLAMA_MODEL:      process.env.OLLAMA_MODEL      || 'llama3.2:latest',
+  OLLAMA_MODEL:      process.env.OLLAMA_MODEL      || 'llama3:latest',
   // 120s: first call loads the model into VRAM/RAM (cold start can take 30-60s)
   OLLAMA_TIMEOUT_MS: parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000,
 

@@ -42,7 +42,7 @@ const { getHistory } = require('./redisService');
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const OLLAMA_URL        = env.OLLAMA_URL        || 'http://localhost:11434';
-const OLLAMA_MODEL      = env.OLLAMA_MODEL      || 'llama3.2';
+const OLLAMA_MODEL      = env.OLLAMA_MODEL      || 'llama3:latest';
 const OLLAMA_TIMEOUT_MS = env.OLLAMA_TIMEOUT_MS || 30_000;
 
 // ─── Business profile cache ───────────────────────────────────────────────────
