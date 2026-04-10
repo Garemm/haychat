@@ -173,6 +173,12 @@ const PRODUCT_QUERY_PATTERNS = [
   /existe[n]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /busco\s+(?:un\s+|una\s+|el\s+|la\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /quiero\s+(?:un\s+|una\s+|el\s+|la\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  // Purchase imperatives: "dame una hamburguesa doble", "dame un taco al pastor"
+  // "dame el catálogo/menú de X" is intercepted by the catalog pattern above.
+  // This pattern captures direct product requests: "dame (un/una) <product>".
+  /\bdame\s+(?:un[ao]\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  // Past-tense order: "pedí una pizza hawaiana" — common in Mexican informal speech
+  /\bped[ií]\s+(?:un[ao]\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /me\s+interesa\s+(?:el\s+|la\s+|los\s+|las\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
 
   // "informacion sobre/de/acerca de X" — descriptions requested via preposition
@@ -315,22 +321,25 @@ async function queryProducts(entity, businessId) {
   }
 
   // Multi-word fallback: "cuaderno sin lineas" won't match "cuaderno de dibujo sin lineas"
-  // as a substring, so we also require each word to appear ANYWHERE in the text fields.
-  // This is added as an extra OR condition (AND across words, OR across fields per word).
+  // as a substring, so we also require each word to appear in the PRODUCT NAME.
+  //
+  // IMPORTANT: We search p.name ONLY (not description/attributes) here because
+  // combining individual words OR'd across description+attrs produces false positives:
+  //   "agua natural" → "agua" in description + "natural" in description of an unrelated
+  //   product ("Hamburguesa Vegetariana — ingredientes naturales en agua purificada")
+  //   would match, returning completely wrong results.
+  // The full-phrase ILIKE in the first loop already covers description/attr matches for the
+  // exact phrase. This fallback only adds value for product NAMES that contain all the words
+  // but not as a consecutive substring.
   for (const v of variants) {
     const words = v.split(' ').filter((w) => w.length >= 2);
     if (words.length < 2) continue; // single-word already covered above
     const wordClauses = [];
     for (const w of words) {
       const like = `%${sqlParam(w)}%`;
-      wordClauses.push(
-        `(${trCol('p.name')} ILIKE $${idx}` +
-        ` OR ${trCol('p.description')} ILIKE $${idx + 1}` +
-        ` OR EXISTS (SELECT 1 FROM product_attributes pa2 WHERE pa2.product_id = p.id` +
-        ` AND (${trCol('pa2.value')} ILIKE $${idx + 2} OR ${trCol('pa2.key')} ILIKE $${idx + 3})))`
-      );
-      params.push(like, like, like, like);
-      idx += 4;
+      wordClauses.push(`${trCol('p.name')} ILIKE $${idx}`);
+      params.push(like);
+      idx += 1;
     }
     conditions.push(`(${wordClauses.join(' AND ')})`);
   }
@@ -569,7 +578,7 @@ async function detectEntities(message, businessId, intentResult = { intent: null
       try {
         const categoryRows = await queryCategories(tipoCand, businessId);
         if (categoryRows.length > 0) {
-          return { ...empty, category: tipoCand, type: 'category', value: tipoCand };
+          return { ...empty, category: tipoCand, type: 'category', value: tipoCand, _categoryRows: categoryRows };
         }
       } catch (err) {
         console.error('[EntityDetector] Error querying categories for tipo-de:', err.message);
@@ -599,7 +608,7 @@ async function detectEntities(message, businessId, intentResult = { intent: null
       try {
         const categoryRows = await queryCategories(queCand, businessId);
         if (categoryRows.length > 0) {
-          return { ...empty, category: queCand, type: 'category', value: queCand };
+          return { ...empty, category: queCand, type: 'category', value: queCand, _categoryRows: categoryRows };
         }
       } catch (err) {
         console.error('[EntityDetector] Error querying categories for que-entity-tienen:', err.message);
@@ -626,7 +635,7 @@ async function detectEntities(message, businessId, intentResult = { intent: null
       try {
         const categoryRows = await queryCategories(bareCand, businessId);
         if (categoryRows.length > 0) {
-          return { ...empty, category: bareCand, type: 'category', value: bareCand };
+          return { ...empty, category: bareCand, type: 'category', value: bareCand, _categoryRows: categoryRows };
         }
       } catch (err) {
         console.error('[EntityDetector] Error querying categories for bare noun:', err.message);

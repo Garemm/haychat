@@ -54,10 +54,12 @@ describe('getContext()', () => {
   test('devuelve estructura con todos los campos en null para sesión nueva', async () => {
     const ctx = await getContext(BIZ, sid('new'));
     expect(ctx).toEqual({
-      lastIntent:     null,
-      lastEntity:     { type: null, value: null },
-      lastAttributes: null,
-      updatedAt:      null,
+      lastIntent:       null,
+      lastEntity:       { type: null, value: null },
+      lastAttributes:   null,
+      updatedAt:        null,
+      topicMemory:      [],
+      rejectedEntities: [],
     });
   });
 
@@ -133,14 +135,14 @@ describe('updateContext()', () => {
     const lastCall = mockRedisInstance.setex.mock.calls.find(([k]) => k === `ctx:${BIZ}:${id}`);
     expect(lastCall).toBeDefined();
     expect(lastCall[0]).toBe(`ctx:${BIZ}:${id}`);
-    expect(lastCall[1]).toBe(210); // TTL exacto
+    expect(lastCall[1]).toBe(600); // TTL exacto
   });
 
-  test('el TTL es exactamente 210 segundos', async () => {
+  test('el TTL es exactamente 600 segundos', async () => {
     const id = sid('ttl');
     await updateContext(BIZ, id, { lastIntent: 'precios' });
     const setexCall = mockRedisInstance.setex.mock.calls.find(([k]) => k === `ctx:${BIZ}:${id}`);
-    expect(setexCall[1]).toBe(210);
+    expect(setexCall[1]).toBe(600);
   });
 
   test('hace MERGE con el contexto previo (no sobreescribe campos no enviados)', async () => {

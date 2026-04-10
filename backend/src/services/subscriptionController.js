@@ -82,7 +82,7 @@ async function getSubscriptionPlan(businessId) {
  *   plan:       number,        // plan efectivo aplicado (1 o 2)
  * }>}
  */
-async function handleAIGate({ businessId, originalText, normalizedText, intentResult, entityResult, context }) {
+async function handleAIGate({ businessId, originalText, normalizedText, intentResult, entityResult, context, sessionId = null }) {
 
   // ── 1. Consultar plan en la BD ────────────────────────────────────────────
   const plan = await getSubscriptionPlan(businessId);
@@ -111,7 +111,8 @@ async function handleAIGate({ businessId, originalText, normalizedText, intentRe
     originalText,
     ragContext,
     { lastIntent: context?.lastIntent ?? null, lastEntity: context?.lastEntity ?? null },
-    businessId
+    businessId,
+    sessionId
   );
 
   if (ollamaText) {

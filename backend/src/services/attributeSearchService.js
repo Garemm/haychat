@@ -476,11 +476,11 @@ function formatCompoundQueryResponse(compound, rows, strategy) {
     return `Lo siento, no encontré productos relacionados con "${label}". ¿Quieres ver el catálogo completo o buscar algo diferente?`;
   }
 
-  const fallbackNote =
+  const prefix =
     strategy === 'entity-only'
-      ? ` No encontré "${compound.fullPhrase}" exactamente, pero aquí tienes opciones de "${compound.entity}".`
+      ? `No encontré "${compound.fullPhrase}" exactamente, pero aquí tienes opciones de "${compound.entity}": `
       : strategy === 'attribute-only'
-      ? ` No encontré "${compound.entity}" específicamente, pero te muestro opciones con "${compound.attribute}".`
+      ? `No encontré "${compound.entity}" específicamente, pero te muestro opciones con "${compound.attribute}": `
       : '';
 
   const items   = _buildVoiceList(rows);
@@ -488,12 +488,18 @@ function formatCompoundQueryResponse(compound, rows, strategy) {
   const listed  = _enumList(items);
 
   if (rows.length === 1) {
-    return `Sí 😊, tenemos ${listed}.${fallbackNote} ¿Te interesa o buscas algo más?`;
+    return prefix
+      ? `${prefix}${listed}. ¿Te interesa o buscas algo más?`
+      : `Sí 😊, tenemos ${listed}. ¿Te interesa o buscas algo más?`;
   }
   if (hasMore) {
-    return `Sí 😊, tenemos varias opciones con ${label}, como ${listed}, entre otras.${fallbackNote} Si buscas algo en específico, dime y te ayudo.`;
+    return prefix
+      ? `${prefix}${listed}, entre otras. Si buscas algo en específico, dime y te ayudo.`
+      : `Sí 😊, tenemos varias opciones con ${label}, como ${listed}, entre otras. Si buscas algo en específico, dime y te ayudo.`;
   }
-  return `Sí 😊, tenemos varias opciones con ${label}: ${listed}.${fallbackNote} ¿Cuál te interesa?`;
+  return prefix
+    ? `${prefix}${listed}. ¿Cuál te interesa?`
+    : `Sí 😊, tenemos varias opciones con ${label}: ${listed}. ¿Cuál te interesa?`;
 }
 
 // ─── Response formatter ───────────────────────────────────────────────────────

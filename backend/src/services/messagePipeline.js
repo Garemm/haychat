@@ -28,10 +28,13 @@
 
 const { normalize } = require('./normalize');
 const { preprocessMessage } = require('./textPreprocessor');
+const { detectNegation } = require('./textPreprocessor');
 const { detectIntent, isStandaloneIntent } = require('./intentDetector');
 const { detectEntities, queryProducts, formatProductResponse } = require('./entityDetector');
 const { detectDay } = require('./dayDetector');
 const { getContext, updateContext } = require('./sessionContextService');
+const { pushTurnMemory, addRejectedEntity } = require('./redisService');
+const { parseMultiIntent, joinResponses } = require('./multiIntentParser');
 const { logProductQuery } = require('./queryLogService');
 const {
   getBusinessInfoByIntent,
@@ -44,11 +47,9 @@ const {
 } = require('./businessInfoService');
 const { formatIntentResponse, formatHorarioDay, formatList, formatDescripcionResponse, formatProductAttributes, formatServiceDetail, formatServiceWithContact } = require('./intentResponseFormatter');
 const { getKeywordResponse } = require('../mockai/keywordResponses');
-const { getMockOpenAIResponse, getRAGOpenAIResponse } = require('../temp/mockOpenAI');
-const { generateOllamaResponse } = require('./ollamaService');
-const { shouldUseAI, hasRelevantData } = require('./aiDecisionEngine');
-const { filterRelevantData } = require('./ragFilterService');
-const { handleAIGate, getSubscriptionPlan, PLAN_PREMIUM } = require('./subscriptionController');
+const { getMockOpenAIResponse } = require('../temp/mockOpenAI');
+const { shouldUseAI } = require('./aiDecisionEngine');
+const { handleAIGate } = require('./subscriptionController');
 const { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } = require('./attributeSearchService');
 const { extractAttribute } = require('./attributeExtractor');
 
@@ -290,6 +291,10 @@ const AMBIGUOUS_PATTERNS = [
   /^en cuanto esta$/,
   /^y precio$/,
   /^y el precio$/,
+  /^y precios$/,         // plural — "¿Y precios?" after product context
+  /^y la promo$/,
+  /^y las promos$/,
+  /^y promociones$/,
   /^esta disponible$/,
   /^hay stock$/,
   /^que mas tienen$/,
@@ -415,6 +420,10 @@ function extractFollowUpEntity(normalizedText, lastEntity) {
     // Purchase-action verbs — these signal intent to BUY, never appear as product names.
     // Without this guard, "me gustaria pedir una" would be extracted as a product name.
     'pedir', 'ordenar', 'comprar', 'adquirir',
+    // Purchase imperative commands — "dame una X", "trae un X", "pedi una X" include
+    // the product name BUT also the imperative verb; treat the whole phrase as intent,
+    // not as a bare product follow-up. Entity extraction handled via PRODUCT_QUERY_PATTERNS.
+    'dame', 'trae', 'traeme', 'pedi',
     // Modal desire words — similarly anaphoric, never product names
     'gustaria', 'quisiera',
     // Reflexive purchase tokens
@@ -508,10 +517,15 @@ function decide(intentResult, entityResult, context, normalizedText) {
   // to a previously mentioned product. If the last search returned nothing, these
   // mean the user is asking for something that doesn't exist → surface a clear
   // "not available" response instead of routing to generic purchase contact info.
+  //
+  // Guard: skip when the current message explicitly names a NEW product entity
+  // (e.g. "dame una pizza hawaiana" after a failed "hamburguesa doble" lookup).
+  // In that case hasEntity=true and Rule 2 should handle it directly.
   if (
     intentResult.intent === 'comprar' &&
     context.lastEntityFound === false &&
-    context.lastEntity?.value
+    context.lastEntity?.value &&
+    !hasEntity
   ) {
     const hasGenuinePhrase = COMPRAR_GENUINELY_STANDALONE
       .some((p) => normalizedText.includes(normalize(p)));
@@ -1413,11 +1427,13 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
     }
   }
 
-  // Step 2: AI decision engine — should we even attempt AI?
+  // Step 2: AI decision engine — segunda comprobación (FLUJO_CHAT §3.4 PASO 2).
+  // shouldUseAI checks explicit AI signals (recommendations, comparisons, etc.)
+  // BEFORE the intent-score guard, so a high comprar score never blocks AI routing.
   const aiDecision = shouldUseAI(normalizedText, intentResult, entityResult, context);
 
   if (aiDecision.routing === 'backend') {
-    // Backend fallback — use the old mock response (no AI needed)
+    // Backend fallback — use the mock response (no AI needed for this message)
     const fallback = getMockOpenAIResponse(originalText, {
       lastProduct: context?.lastEntity?.value ?? null,
       lastIntent: context?.lastIntent ?? null,
@@ -1425,49 +1441,23 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
     return { text: fallback, aiUsed: false, ragContext: null };
   }
 
-  // Step 3: RAG filter — fetch only relevant data before sending to AI
-  const ragContext = await filterRelevantData(
-    normalizedText, businessId, intentResult, entityResult, context
-  );
-
-  // Step 4: Guard — if no relevant data, don't waste an AI call
-  if (!hasRelevantData(ragContext)) {
-    const fallback = getMockOpenAIResponse(originalText, {
-      lastProduct: context?.lastEntity?.value ?? null,
-      lastIntent: context?.lastIntent ?? null,
-    });
-    return { text: fallback, aiUsed: false, ragContext };
-  }
-
-  // Step 4b: Subscription gate — Ollama (llama3) only for plan Premium (subscription_id = 2)
-  const plan = await getSubscriptionPlan(businessId);
-  if (plan !== PLAN_PREMIUM) {
-    const fallback = getMockOpenAIResponse(originalText, {
-      lastProduct: context?.lastEntity?.value ?? null,
-      lastIntent: context?.lastIntent ?? null,
-    });
-    return { text: fallback, aiUsed: false, ragContext };
-  }
-
-  // Step 5: Ollama LLM with business context + RAG data
-  const ollamaText = await generateOllamaResponse(
-    originalText,
-    ragContext,
-    { lastIntent: context?.lastIntent ?? null, lastEntity: context?.lastEntity ?? null },
+  // Step 3–5: Subscription gate → RAG → Ollama (FLUJO_CHAT §3.4 PASO 4b–5).
+  // Delegate entirely to subscriptionController.handleAIGate which:
+  //   • Checks subscription plan (Lite → placeholder mock, Premium → continues)
+  //   • Runs RAG filter for Premium to fetch relevant business data
+  //   • Calls Ollama (llama3) with business context + RAG data
+  //   • Falls back to getRAGOpenAIResponse if Ollama is unavailable
+  const gateResult = await handleAIGate({
     businessId,
-    sessionId
-  );
-  if (ollamaText) {
-    return { text: ollamaText, aiUsed: true, ragContext };
-  }
-
-  // Step 6: Final fallback — simulated response when Ollama is unavailable
-  const aiResponse = getRAGOpenAIResponse(originalText, ragContext, {
-    lastIntent: context?.lastIntent ?? null,
-    lastEntity: context?.lastEntity ?? null,
+    originalText,
+    normalizedText,
+    intentResult,
+    entityResult,
+    context,
+    sessionId,
   });
 
-  return { text: aiResponse, aiUsed: true, ragContext };
+  return { text: gateResult.text, aiUsed: gateResult.aiUsed, ragContext: gateResult.ragContext };
 }
 
 // ─── Full pipeline ────────────────────────────────────────────────────────────
@@ -1482,16 +1472,42 @@ async function processMessage({ text, sessionId, businessId }) {
   // 1. Preprocess: normalize + expand abbreviations + correct typos
   const normalizedText = preprocessMessage(text);
 
+  // 1.5  Negation detection — captures "sin X", "no quiero X", "que no tenga X", etc.
+  //      Results are stored in Redis AFTER the response so they don't change routing
+  //      for _this_ turn, but ARE available from the next turn onward.
+  const negationInfo = detectNegation(normalizedText);
+
+  // 1.6  Multi-intent splitting — splits compound messages at Spanish connectors.
+  //      "cuánto cuesta la pizza y a qué hora abren?" → two independent segments.
+  //      When only one segment is returned the whole flow is a single-pass (normal).
+  const intentSegments = parseMultiIntent(normalizedText);
+  const isMultiIntent  = intentSegments.length > 1;
+
+  // ROOT-CAUSE FIX: when the message is multi-intent, the combined text
+  // (e.g. "cuanto cuesta la pizza hawaiana y que horarios tienen") causes
+  // entity-extraction regexes to greedily include connector words and the
+  // second clause ("pizza hawaiana y que horarios tienen" as the entity value).
+  // The DB lookup then fails → pipeline falls back to the STALE context entity
+  // (e.g. previous "Orden de Carnitas").
+  //
+  // Solution: run steps 2-6 (day/intent/entity detection + decision) on the
+  // PRIMARY segment only ("cuanto cuesta la pizza hawaiana"). Secondary
+  // segments are still processed inline after the primary response (see the
+  // multi-intent block below).
+  //
+  // Single-intent messages: primaryText === normalizedText (no change in behaviour).
+  const primaryText = isMultiIntent ? intentSegments[0].segment : normalizedText;
+
   // 2. Detect day entity (highest priority — skips DB lookup entirely)
-  const dayEntity = detectDay(normalizedText);
+  const dayEntity = detectDay(primaryText);
 
   // 3. Detect intent (scoring) — pass preprocessed text so typos are already corrected
-  const intentResult = detectIntent(normalizedText);
+  const intentResult = detectIntent(primaryText);
 
   // 4. Detect entities (DB lookup — skipped when day detected)
   const entityResult = dayEntity
     ? dayEntity
-    : await detectEntities(normalizedText, businessId, intentResult);
+    : await detectEntities(primaryText, businessId, intentResult);
 
   // 5. Get context from Redis
   const context = await getContext(businessId, sessionId);
@@ -1506,7 +1522,7 @@ async function processMessage({ text, sessionId, businessId }) {
   // should accumulate attributes.
   const FRESH_ATTR_QUERY_RE = /\b(?:algo|alguna?|alguno?|productos?|hay|tienes?|tienen|busco|necesito)\b/;
   if (
-    !FRESH_ATTR_QUERY_RE.test(normalizedText) &&
+    !FRESH_ATTR_QUERY_RE.test(primaryText) &&
     entityResult.type === 'attribute' &&
     context.lastEntity?.type === 'attribute' &&
     Array.isArray(context.lastAttributes) &&
@@ -1525,7 +1541,7 @@ async function processMessage({ text, sessionId, businessId }) {
   }
 
   // 6. Make decision
-  const decision = decide(intentResult, entityResult, context, normalizedText);
+  const decision = decide(intentResult, entityResult, context, primaryText);
 
   // If we detected combined attributes, attach them to the decision
   if (entityResult._combinedAttributes) {
@@ -1554,7 +1570,7 @@ async function processMessage({ text, sessionId, businessId }) {
       // accumulate chains like "hamburguesa con queso con picante".
       const cleanBase = aiBase.replace(/\s+con\s+.+$/, '').trim();
       const CON_RE = /\bcon\s+([\w\u00f1][\w\u00f1\s]{1,25}?)(?:\s*\?)?$/;
-      const conMatch = CON_RE.exec(normalizedText);
+      const conMatch = CON_RE.exec(primaryText);
       const attrSuffix = conMatch?.[1]?.trim() ?? null;
       const entityValue = attrSuffix ? `${cleanBase} con ${attrSuffix}` : cleanBase;
       decision._aiEntity = { type: 'product', value: entityValue };
@@ -1564,6 +1580,8 @@ async function processMessage({ text, sessionId, businessId }) {
   // Logging
   const logs = {
     normalizedText,
+    primaryText:   isMultiIntent ? primaryText : undefined,
+    isMultiIntent,
     intentScores: intentResult.scores,
     intentWinner: intentResult.intent,
     intentScore: intentResult.score,
@@ -1585,7 +1603,7 @@ async function processMessage({ text, sessionId, businessId }) {
   if (decision.strategy === 'ai') {
     // Hybrid AI path: decision engine + RAG filter + simulated OpenAI
     const aiResult = await handleAIFallback(
-      text, normalizedText, businessId, intentResult, entityResult, context, sessionId
+      text, primaryText, businessId, intentResult, entityResult, context, sessionId
     );
     replyText = aiResult.text;
     aiUsed = aiResult.aiUsed;
@@ -1604,7 +1622,7 @@ async function processMessage({ text, sessionId, businessId }) {
     }
   } else {
     // ── Ruta determinista: intents + contexto + valores ────────────────────────
-    replyText = await executeDecision(decision, text, normalizedText, businessId, context, sessionId);
+    replyText = await executeDecision(decision, text, primaryText, businessId, context, sessionId);
   }
 
   // Enrich logs with AI routing info
@@ -1653,6 +1671,79 @@ async function processMessage({ text, sessionId, businessId }) {
 
   if (Object.keys(contextUpdate).length > 0) {
     await updateContext(businessId, sessionId, contextUpdate);
+  }
+
+  // ── Multi-intent: process secondary segments inline ───────────────────────
+  // When the message was split at a connector (e.g. "cuánto cuesta X y
+  // a qué hora abren?"), each secondary segment is run through the pipeline
+  // independently using fresh context (updated by the primary segment above).
+  // Responses are joined with a natural Spanish bridge phrase.
+  if (isMultiIntent) {
+    const allResponses = [{ text: replyText, connectorType: 'primary' }];
+
+    for (let i = 1; i < intentSegments.length; i++) {
+      const { segment, connectorType } = intentSegments[i];
+      try {
+        // Each segment was already normalised by parseMultiIntent (it received
+        // the already-preprocessed normalizedText as input).
+        const segDay    = detectDay(segment);
+        const segIntent = detectIntent(segment);
+        const segEntity = segDay
+          ? segDay
+          : await detectEntities(segment, businessId, segIntent);
+
+        // Use fresh context — updated by previous segment processing
+        const freshCtx = await getContext(businessId, sessionId);
+
+        const segDecision = decide(segIntent, segEntity, freshCtx, segment);
+
+        // Propagate combined attributes from secondary segment if applicable
+        if (segEntity._combinedAttributes) {
+          segDecision._attributes = segEntity._combinedAttributes;
+        }
+
+        const segReply = await executeDecision(
+          segDecision, segment, segment, businessId, freshCtx, sessionId
+        );
+
+        allResponses.push({ text: segReply, connectorType });
+
+        // Persist context update for this secondary segment
+        const segCtxUpdate = buildContextUpdate(segDecision);
+        if (Object.keys(segCtxUpdate).length > 0) {
+          await updateContext(businessId, sessionId, segCtxUpdate);
+        }
+      } catch (err) {
+        console.error('[Pipeline] Multi-intent segment error:', segment, err.message);
+      }
+    }
+
+    if (allResponses.length > 1) {
+      replyText = allResponses[0].text;
+      for (let i = 1; i < allResponses.length; i++) {
+        replyText = joinResponses(replyText, allResponses[i].text, allResponses[i].connectorType);
+      }
+    }
+  }
+
+  // ── Turn memory: push this turn to topicMemory ring buffer ───────────────
+  // Stored AFTER the response so `found` reflects the real DB outcome.
+  try {
+    await pushTurnMemory(businessId, sessionId, {
+      intent: decision.intent,
+      entity: decision.entity ?? { type: null, value: null },
+      found:  contextUpdate.lastEntityFound !== false,
+      ts:     Date.now(),
+    });
+  } catch { /* non-fatal */ }
+
+  // ── Negation: persist rejected terms to Redis ─────────────────────────────
+  if (negationInfo.hasNegation) {
+    for (const term of negationInfo.negatedTerms) {
+      try {
+        await addRejectedEntity(businessId, sessionId, term);
+      } catch { /* non-fatal */ }
+    }
   }
 
   return { replyText, decision, logs };

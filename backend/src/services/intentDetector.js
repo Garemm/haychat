@@ -192,4 +192,31 @@ async function initIntents() {
   }
 }
 
-module.exports = { detectIntent, scoreIntents, isStandaloneIntent, initIntents, MIN_CONFIDENCE };
+/**
+ * Returns ALL intents with score ≥ MIN_CONFIDENCE, sorted by score descending.
+ *
+ * Used by the multi-intent parser to determine whether secondary segments from
+ * a split compound message carry a detectable, different intent than the primary.
+ *
+ * @param {string} message  Raw or already-normalized message text.
+ * @returns {{ intent: string, score: number }[]}
+ *
+ * @example
+ * detectMultipleIntents('cuanto cuesta la pizza y a que hora abren')
+ * // [
+ * //   { intent: 'precios',  score: 3 },
+ * //   { intent: 'horarios', score: 2 },
+ * // ]
+ */
+function detectMultipleIntents(message) {
+  if (!message) return [];
+  const normalizedText = normalize(message);
+  const scores = scoreIntents(normalizedText);
+
+  return Object.entries(scores)
+    .filter(([, score]) => score >= MIN_CONFIDENCE)
+    .sort(([, a], [, b]) => b - a)
+    .map(([intent, score]) => ({ intent, score }));
+}
+
+module.exports = { detectIntent, scoreIntents, isStandaloneIntent, initIntents, detectMultipleIntents, MIN_CONFIDENCE };

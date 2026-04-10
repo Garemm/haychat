@@ -87,9 +87,10 @@ function isMaterial(candidate) {
  *
  * @param {string} value     Normalized attribute value
  * @param {string} [hint]    Preposition that triggered extraction ("con"|"para"|"de"|"que tenga")
- * @returns {'measure'|'material'|'use'|'feature'|'ingredient'}
+ * @returns {'measure'|'material'|'use'|'feature'|'ingredient'|'price_filter'}
  */
 function classifyAttributeType(value, hint) {
+  if (hint === 'price_filter') return 'price_filter';
   if (isMeasure(value)) return 'measure';
   // "para" always signals intended USE, even if the word is also a material
   if (hint === 'para') return 'use';
@@ -121,6 +122,11 @@ const ATTRIBUTE_PATTERNS = [
   { pattern: /\bde\s+(?<attr>\d+(?:[.,]\d+)?\s+[\wñ]+)/, hint: 'de' },
   // "de X" — after "tornillos de madera", "cables de cobre" (not standalone 'de')
   { pattern: /\bde\s+(?<attr>[\wñ]+(?:\s+[\wñ]+){0,3})/, hint: 'de' },
+  // price-filter adjectives at end of message:
+  //   "dame opciones baratas" → { value: 'baratas', type: 'price_filter' }
+  //   "algo más barato" / "lo más económico"
+  // Lower priority — only reached when no other ATTRIBUTE_PATTERNS matched.
+  { pattern: /\b(?<attr>(?:m[aá]s\s+|lo\s+m[aá]s\s+)?(?:barat[ao]s?|econ[oó]mic[ao]s?|accesibles?))\s*$/, hint: 'price_filter' },
 ];
 
 /**
@@ -196,6 +202,9 @@ function isAttributeQuery(normalizedText) {
   // Class 2b: "de NUMBER UNIT" measure pattern ("de 2 metros", "de 10 mm")
   if (/\bde\s+\d+(?:[.,]\d+)?\s+\w/.test(normalizedText)) return true;
 
+  // Class 3: price-filter adjectives ("algo barato", "dame opciones baratas", "lo más económico")
+  if (/\b(?:m[aá]s\s+)?(?:barat[ao]s?|econ[oó]mic[ao]s?|accesibles?)\b/.test(normalizedText)) return true;
+
   return false;
 }
 
@@ -204,7 +213,7 @@ function isAttributeQuery(normalizedText) {
 /**
  * @typedef {Object} ExtractedAttribute
  * @property {string} value  - Normalized attribute value (e.g. "queso", "2 metros")
- * @property {'measure'|'material'|'use'|'feature'} type  - Semantic type
+ * @property {'measure'|'material'|'use'|'feature'|'price_filter'} type  - Semantic type
  */
 
 /**

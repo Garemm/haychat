@@ -35,8 +35,11 @@ const redis = require('../config/redis');
 const { isRedisUp } = require('../config/redis');
 
 // ─── TTL constants ─────────────────────────────────────────────────────────────
-const CTX_TTL_SECONDS  = 210;    // 3.5 minutes — conversational context window
+const CTX_TTL_SECONDS  = 600;    // 10 minutes — conversational context window
 const HIST_TTL_SECONDS = 21600;  // 6 hours    — message history window
+
+/** Maximum turns kept in topicMemory ring buffer per session. */
+const MAX_TOPIC_MEMORY = 6;
 
 // ─── Key builders ──────────────────────────────────────────────────────────────
 
@@ -54,10 +57,16 @@ function histKey(businessId, sessionId) {
 
 /** Empty context — returned for new sessions or when Redis is unavailable. */
 const EMPTY_CONTEXT = {
-  lastIntent:     null,
-  lastEntity:     { type: null, value: null },
-  lastAttributes: null,
-  updatedAt:      null,
+  lastIntent:       null,
+  lastEntity:       { type: null, value: null },
+  lastAttributes:   null,
+  updatedAt:        null,
+  // Multi-turn memory — rolling window of recent topics discussed
+  // Each entry: { intent: string|null, entity: object, found: boolean, ts: number }
+  topicMemory:      [],
+  // Negation tracking — entities/terms the user explicitly rejected
+  // Populated by detectNegation() → stored by addRejectedEntity()
+  rejectedEntities: [],
 };
 
 // In-process fallback used during transient Redis outages.
@@ -275,6 +284,57 @@ async function getExpandedIntents() {
   }
 }
 
+// ─── Topic memory helpers ─────────────────────────────────────────────────────
+
+/**
+ * Pushes a turn record onto the topicMemory ring buffer in the session context.
+ * The ring buffer is capped at MAX_TOPIC_MEMORY entries (oldest entry evicted).
+ *
+ * Call AFTER generating the response so `found` reflects the actual DB result.
+ *
+ * @param {number|string} businessId
+ * @param {string}        sessionId
+ * @param {{ intent: string|null, entity: { type: string|null, value: string|null }, found: boolean, ts: number }} turnData
+ * @returns {Promise<void>}
+ */
+async function pushTurnMemory(businessId, sessionId, turnData) {
+  try {
+    const current = await getContext(businessId, sessionId);
+    const memory  = Array.isArray(current.topicMemory) ? current.topicMemory : [];
+    const updated = [...memory, turnData].slice(-MAX_TOPIC_MEMORY);
+    await updateContext(businessId, sessionId, { topicMemory: updated });
+  } catch (err) {
+    if (isRedisUp()) console.warn('[Redis] pushTurnMemory error:', err.message);
+  }
+}
+
+/**
+ * Adds a normalized entity value to the rejectedEntities list for the session.
+ * Duplicate entries are silently ignored. List is capped at 10 items.
+ *
+ * Used to persist user negations ("sin gluten", "no quiero carne") so that
+ * attribute searches and AI recommendations can filter them out.
+ *
+ * @param {number|string} businessId
+ * @param {string}        sessionId
+ * @param {string}        entityValue  Normalized rejected term
+ * @returns {Promise<void>}
+ */
+async function addRejectedEntity(businessId, sessionId, entityValue) {
+  if (!entityValue || entityValue.length < 2) return;
+  try {
+    const current  = await getContext(businessId, sessionId);
+    const existing = Array.isArray(current.rejectedEntities) ? current.rejectedEntities : [];
+    if (!existing.includes(entityValue)) {
+      await updateContext(businessId, sessionId, {
+        rejectedEntities: [...existing, entityValue].slice(-10),
+      });
+    }
+  } catch (err) {
+    if (isRedisUp()) console.warn('[Redis] addRejectedEntity error:', err.message);
+  }
+}
+
 // ─── Exports ───────────────────────────────────────────────────────────────────
 module.exports = {
   // Context
@@ -282,6 +342,9 @@ module.exports = {
   updateContext,
   EMPTY_CONTEXT,
   CTX_TTL_SECONDS,
+  // Topic / negation memory
+  pushTurnMemory,
+  addRejectedEntity,
   // History
   getHistory,
   saveMessage,

@@ -190,7 +190,7 @@ const BusinessModel = {
          AND p.is_available = TRUE
        ORDER BY p.name ASC
        LIMIT $3 OFFSET $4`,
-      [businessId, categoryName, limit, offset]
+      [businessId, `%${categoryName}%`, limit, offset]
     );
     return result.rows;
   },
@@ -208,7 +208,7 @@ const BusinessModel = {
        WHERE p.business_id = $1
          AND c.name ILIKE $2
          AND p.is_available = TRUE`,
-      [businessId, categoryName]
+      [businessId, `%${categoryName}%`]
     );
     return parseInt(result.rows[0]?.total ?? '0', 10);
   },

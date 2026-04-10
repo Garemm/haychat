@@ -123,6 +123,30 @@ horarios: {
     { phrase: 'fin de semana', weight: 2 },
 
     // =========================
+    // Disponibilidad implícita (weight 3)
+    // "¿todavía alcanzo?" / "¿ya cerraron?" — implicitly ask if open NOW
+    // =========================
+    { phrase: 'todavia alcanzo', weight: 3 },
+    { phrase: 'aun alcanzo', weight: 3 },
+    { phrase: 'aun hay servicio', weight: 3 },
+    { phrase: 'ya cerraron', weight: 3 },
+    { phrase: 'ya cerraste', weight: 3 },
+    { phrase: 'ya abrieron', weight: 3 },
+    { phrase: 'ya abriste', weight: 3 },
+    { phrase: 'siguen abiertos', weight: 3 },
+    { phrase: 'todavia estan abiertos', weight: 3 },
+    { phrase: 'ya estan cerrados', weight: 3 },
+    { phrase: 'aun puedo pasar', weight: 3 },
+    { phrase: 'si todavia puedo pasar', weight: 3 },
+    { phrase: 'a que hora pasan por mi', weight: 2 },
+    { phrase: 'todavia atienden', weight: 3 },
+    { phrase: 'ya no atienden', weight: 3 },
+
+    // Días de venta = preguntan cuándo trabajan (horario de operación)
+    { phrase: 'que dias vendes', weight: 3 },
+    { phrase: 'que dias vende', weight: 3 },
+
+    // =========================
     // Errores comunes / chat (weight 1-2)
     // =========================
     { phrase: 'a que ora abren', weight: 2 },
@@ -450,7 +474,10 @@ horarios: {
     // Lenguaje casual
     { phrase: 'que trae eso', weight: 3 },
     { phrase: 'que es eso', weight: 3 },
-    { phrase: 'como es', weight: 3 },
+    { phrase: 'como es el', weight: 3 },
+    { phrase: 'como es la', weight: 3 },
+    { phrase: 'como es ese', weight: 3 },
+    { phrase: 'como es eso', weight: 3 },
     { phrase: 'como funciona', weight: 3 },
     { phrase: 'para que sirve', weight: 3 },
 
@@ -678,6 +705,7 @@ ubicacion: {
     { phrase: 'me la llevo', weight: 3 },
     { phrase: 'voy a comprarlo', weight: 3 },
     { phrase: 'voy a comprarla', weight: 3 },
+      { phrase: 'dame', weight: 3 },
     { phrase: 'damelo', weight: 3 },
     { phrase: 'damela', weight: 3 },
     { phrase: 'deme uno', weight: 3 },

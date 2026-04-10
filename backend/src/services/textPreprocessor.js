@@ -409,6 +409,71 @@ function singularizeTokens(text) {
     .join(' ');
 }
 
+// ─── Negation detection ──────────────────────────────────────────────────────
+
+/**
+ * Spanish negation patterns for detecting what a user explicitly does NOT want.
+ * Applied to already-normalized text (no accents, lowercase, no punctuation).
+ * Each pattern exposes a named capture group `term` for the negated fragment.
+ *
+ * Handles:
+ *   "no quiero carne"               → "carne"
+ *   "sin gluten"                    → "gluten"
+ *   "que no tenga picante"          → "picante"
+ *   "nada de lácteos"               → "lacteos"
+ *   "ningún ingrediente artificial" → "ingrediente artificial"
+ */
+const NEGATION_PATTERNS = [
+  // "no quiero/necesito/busco/pido/deseo X"
+  /\bno\s+(?:quiero|necesito|busco|deseo|pido|queria)\s+(?<term>[\wñ][\wñ\s]{1,30}?)(?=\s+(?:y|pero|o)|$)/g,
+  // "sin X" — explicit exclusion without a verb
+  /\bsin\s+(?<term>[\wñ][\wñ\s]{1,25}?)(?=\s+(?:y|pero|o)|$)/g,
+  // "que no tenga/contenga/lleve/incluya X"
+  /\bque\s+no\s+(?:tenga[n]?|contenga[n]?|lleve[n]?|incluya[n]?|traiga[n]?)\s+(?<term>[\wñ][\wñ\s]{1,25}?)(?=\s+(?:y|pero|o)|$)/g,
+  // "nada de X"
+  /\bnada\s+de\s+(?<term>[\wñ][\wñ\s]{1,25}?)(?=\s+(?:y|pero|o)|$)/g,
+  // "ningún/ninguna X"
+  /\bning[uú]n[ao]?\s+(?<term>[\wñ][\wñ\s]{1,20}?)(?=\s+(?:y|pero|o)|$)/g,
+];
+
+/**
+ * Detects Spanish negation in a normalized message string
+ * and returns all negated terms found.
+ *
+ * Results are stored in Redis context (`rejectedEntities`) so subsequent
+ * turns can exclude those terms from attribute searches and recommendations.
+ *
+ * @param {string} normalizedText  Already preprocessed (no accents, lowercase)
+ * @returns {{ hasNegation: boolean, negatedTerms: string[] }}
+ *
+ * @example
+ * detectNegation('quiero pizza sin gluten y sin cebolla')
+ * // { hasNegation: true, negatedTerms: ['gluten', 'cebolla'] }
+ *
+ * @example
+ * detectNegation('tienen hamburguesas')
+ * // { hasNegation: false, negatedTerms: [] }
+ */
+function detectNegation(normalizedText) {
+  if (!normalizedText) return { hasNegation: false, negatedTerms: [] };
+
+  const negatedTerms = [];
+
+  for (const pattern of NEGATION_PATTERNS) {
+    // Reset lastIndex each iteration since patterns carry the /g flag
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(normalizedText)) !== null) {
+      const term = match.groups?.term?.trim();
+      if (term && term.length >= 2 && !negatedTerms.includes(term)) {
+        negatedTerms.push(term);
+      }
+    }
+  }
+
+  return { hasNegation: negatedTerms.length > 0, negatedTerms };
+}
+
 // ─── Leading connector stripping ───────────────────────────────────────────────
 
 /**
@@ -417,17 +482,29 @@ function singularizeTokens(text) {
  * e.g. "pero hamburguesa con queso" → "hamburguesa con queso"
  *      "aunque tienes tacos?" → "tienes tacos?"
  */
-const LEADING_CONNECTOR_RE = /^(?:y|pero|aunque|pues(?:\s+bien)?|o\s+sea|oye|vaya)\s+/;
+// Discourse fillers and connectors at message start that carry no semantic value.
+// Includes informal Mexican fillers: "va" (= ok), "dale" (= sure), "perfecto", etc.
+const LEADING_CONNECTOR_RE = /^(?:y|pero|aunque|pues(?:\s+bien)?|o\s+sea|oye|vaya|va|perfecto|mira|claro|bueno|dale|ok)\s*[,.]?\s*/;
+
+// "también tienes/tienen/venden X" at the start of a message — the verb phrase
+// adds no new semantic content; strip it so entity/attribute extraction sees "X" cleanly.
+// Works on already-normalized text (no accents → "tambien").
+const LEADING_TAMB_RE = /^tambien\s+(?:tienes?|tienen|venden?|vendes?|hay|ofrecen?|manejan?)\s*/;
 
 /**
- * Strips a leading casual connector token (if present) from an already-
- * normalized (lowercase, no-accent) string.
+ * Strips a leading casual connector or filler phrase (if present) from an
+ * already-normalized (lowercase, no-accent) string.
+ *
+ * Two passes are applied in sequence:
+ *   1. Discourse fillers: "pero", "y", "va", "perfecto", "mira", "claro", etc.
+ *   2. Leading "también tienes/tienen/venden" — content-free intro phrase.
  *
  * @param {string} text  Normalized text
  * @returns {string}
  */
 function stripLeadingConnector(text) {
-  return text.replace(LEADING_CONNECTOR_RE, '').trim();
+  const pass1 = text.replace(LEADING_CONNECTOR_RE, '').trim();
+  return pass1.replace(LEADING_TAMB_RE, '').trim();
 }
 
 // ─── Full preprocessing pipeline ─────────────────────────────────────────────
@@ -469,9 +546,11 @@ module.exports = {
   buildValidSet,
   levenshtein,
   stripLeadingConnector,
+  detectNegation,
   ABBREVIATIONS,
   TYPO_DICT,
   CORRECT_WORDS,
   SINGULARIZE_STOPWORDS,
   LEADING_CONNECTOR_RE,
+  LEADING_TAMB_RE,
 };
