@@ -31,11 +31,12 @@ router.put('/:id', async (req, res, next) => {
     return res.status(400).json({ success: false, message: 'ID de pedido inválido' });
   }
 
-  const { aceptado, detallePedido, horaRecogida, notasAdmin } = req.body;
+  const { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado } = req.body;
 
   // At least one field must be provided
   if (aceptado === undefined && detallePedido === undefined &&
-      horaRecogida === undefined && notasAdmin === undefined) {
+      horaRecogida === undefined && notasAdmin === undefined && liberado === undefined &&
+      nombreCliente === undefined && telefono === undefined && rechazado === undefined) {
     return res.status(400).json({ success: false, message: 'No se enviaron cambios' });
   }
 
@@ -45,6 +46,10 @@ router.put('/:id', async (req, res, next) => {
       detallePedido,
       horaRecogida,
       notasAdmin,
+      liberado,
+      nombreCliente,
+      telefono,
+      rechazado,
     });
 
     if (!updated) {
@@ -58,9 +63,13 @@ router.put('/:id', async (req, res, next) => {
         getIO().to(room).emit('pedido_actualizado', {
           id:            updated.id,
           aceptado:      updated.aceptado,
+          nombreCliente: updated.nombre_cliente,
+          telefono:      updated.telefono,
           detallePedido: updated.detalle_pedido,
           horaRecogida:  updated.hora_recogida,
           notasAdmin:    updated.notas_admin ?? null,
+          liberado:      updated.liberado,
+          rechazado:     updated.rechazado,
         });
       } catch (socketErr) {
         // Socket not initialized or room empty — non-fatal
@@ -87,6 +96,24 @@ router.get('/:id', async (req, res, next) => {
     const pedido = await PedidoModel.getPedidoById(id);
     if (!pedido) return res.status(404).json({ success: false, message: 'Pedido no encontrado' });
     return res.json({ success: true, data: pedido });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/pedidos/:id
+ * Customer cancels their own unconfirmed order.
+ */
+router.delete('/:id', async (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'ID de pedido inválido' });
+  }
+  try {
+    const deleted = await PedidoModel.deletePedido(id);
+    if (!deleted) return res.status(404).json({ success: false, message: 'Pedido no encontrado' });
+    return res.json({ success: true });
   } catch (err) {
     next(err);
   }

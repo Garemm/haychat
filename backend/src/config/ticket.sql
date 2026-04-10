@@ -37,3 +37,19 @@ CREATE TABLE IF NOT EXISTS pedidos (
 -- Add session_id and notas_admin to existing tables (safe to re-run)
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS session_id   VARCHAR(128);
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS notas_admin  TEXT;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3. Add liberado column to pedidos (marks the order as released/fulfilled)
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS liberado BOOLEAN NOT NULL DEFAULT false;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4. Make hora_recogida nullable (field removed from customer form)
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE pedidos ALTER COLUMN hora_recogida DROP NOT NULL;
+ALTER TABLE pedidos ALTER COLUMN hora_recogida SET DEFAULT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5. Add rechazado column to pedidos (admin can reject an order)
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS rechazado BOOLEAN NOT NULL DEFAULT false;

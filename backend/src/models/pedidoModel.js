@@ -32,15 +32,15 @@ const PedidoModel = {
 
   /**
    * Inserts a new pedido and returns the full row.
-   * @param {{ businessId: number, sessionId: string, nombreCliente: string, telefono: string, detallePedido: string, horaRecogida: string }} data
+   * @param {{ businessId: number, sessionId: string, nombreCliente: string, telefono: string, detallePedido: string }} data
    */
-  async createPedido({ businessId, sessionId, nombreCliente, telefono, detallePedido, horaRecogida }) {
+  async createPedido({ businessId, sessionId, nombreCliente, telefono, detallePedido }) {
     const result = await db.query(
       `INSERT INTO pedidos
-         (business_id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida, fecha, aceptado, notas_admin`,
-      [businessId, sessionId ?? null, nombreCliente, telefono, detallePedido, horaRecogida]
+         (business_id, session_id, nombre_cliente, telefono, detalle_pedido)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado`,
+      [businessId, sessionId ?? null, nombreCliente, telefono, detallePedido]
     );
     return result.rows[0];
   },
@@ -52,7 +52,7 @@ const PedidoModel = {
   async getPedidoById(id) {
     const result = await db.query(
       `SELECT id, business_id, session_id, nombre_cliente, telefono,
-              detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, created_at
+              detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado, created_at
        FROM pedidos
        WHERE id = $1`,
       [id]
@@ -67,15 +67,19 @@ const PedidoModel = {
    * @param {{ aceptado?: boolean, detallePedido?: string, horaRecogida?: string, notasAdmin?: string }} fields
    * @returns {object|null} Updated row, or null if not found.
    */
-  async updatePedido(id, { aceptado, detallePedido, horaRecogida, notasAdmin } = {}) {
+  async updatePedido(id, { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado } = {}) {
     const sets   = [];
     const params = [];
     let   idx    = 1;
 
-    if (aceptado      !== undefined) { sets.push(`aceptado = $${idx++}`);       params.push(aceptado); }
-    if (detallePedido !== undefined) { sets.push(`detalle_pedido = $${idx++}`); params.push(detallePedido); }
-    if (horaRecogida  !== undefined) { sets.push(`hora_recogida = $${idx++}`);  params.push(horaRecogida); }
-    if (notasAdmin    !== undefined) { sets.push(`notas_admin = $${idx++}`);    params.push(notasAdmin); }
+    if (aceptado      !== undefined) { sets.push(`aceptado = $${idx++}`);        params.push(aceptado); }
+    if (detallePedido !== undefined) { sets.push(`detalle_pedido = $${idx++}`);  params.push(detallePedido); }
+    if (horaRecogida  !== undefined) { sets.push(`hora_recogida = $${idx++}`);   params.push(horaRecogida); }
+    if (notasAdmin    !== undefined) { sets.push(`notas_admin = $${idx++}`);     params.push(notasAdmin); }
+    if (liberado      !== undefined) { sets.push(`liberado = $${idx++}`);        params.push(liberado); }
+    if (nombreCliente !== undefined) { sets.push(`nombre_cliente = $${idx++}`);  params.push(nombreCliente); }
+    if (telefono      !== undefined) { sets.push(`telefono = $${idx++}`);        params.push(telefono); }
+    if (rechazado     !== undefined) { sets.push(`rechazado = $${idx++}`);       params.push(rechazado); }
 
     if (sets.length === 0) return null;
 
@@ -85,10 +89,23 @@ const PedidoModel = {
        SET ${sets.join(', ')}
        WHERE id = $${idx}
        RETURNING id, business_id, session_id, nombre_cliente, telefono,
-                 detalle_pedido, hora_recogida, fecha, aceptado, notas_admin`,
+                 detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado`,
+
       params
     );
     return result.rows[0] ?? null;
+  },
+
+  /**
+   * Deletes a pedido by id. Returns true if deleted, false if not found.
+   * @param {number} id
+   */
+  async deletePedido(id) {
+    const result = await db.query(
+      `DELETE FROM pedidos WHERE id = $1`,
+      [id]
+    );
+    return (result.rowCount ?? 0) > 0;
   },
 };
 

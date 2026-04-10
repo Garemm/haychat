@@ -323,7 +323,6 @@ const initSocket = (httpServer) => {
       nombreCliente,
       telefono,
       detallePedido,
-      horaRecogida,
     } = {}) => {
       // ── Input validation ──────────────────────────────────────────────────
       if (!businessId || typeof businessId !== 'number') {
@@ -342,24 +341,12 @@ const initSocket = (httpServer) => {
         socket.emit('pedido_error', { message: 'Detalle del pedido requerido' });
         return;
       }
-      if (!horaRecogida || typeof horaRecogida !== 'string' || !horaRecogida.trim()) {
-        socket.emit('pedido_error', { message: 'Hora de recogida requerida' });
-        return;
-      }
       if (nombreCliente.trim().length > 150) {
         socket.emit('pedido_error', { message: 'Nombre demasiado largo (máx. 150 caracteres)' });
         return;
       }
       if (telefono.trim().length > 50) {
         socket.emit('pedido_error', { message: 'Teléfono demasiado largo (máx. 50 caracteres)' });
-        return;
-      }
-      if (detallePedido.trim().length > 2000) {
-        socket.emit('pedido_error', { message: 'Detalle demasiado largo (máx. 2000 caracteres)' });
-        return;
-      }
-      if (horaRecogida.trim().length > 50) {
-        socket.emit('pedido_error', { message: 'Hora de recogida demasiado larga (máx. 50 caracteres)' });
         return;
       }
 
@@ -370,7 +357,6 @@ const initSocket = (httpServer) => {
           nombreCliente: nombreCliente.trim(),
           telefono:      telefono.trim(),
           detallePedido: detallePedido.trim(),
-          horaRecogida:  horaRecogida.trim(),
         });
 
         // Emit the full pedido row so the client can display a persistent receipt card.
@@ -381,8 +367,9 @@ const initSocket = (httpServer) => {
           nombreCliente: pedido.nombre_cliente,
           telefono:      pedido.telefono,
           detallePedido: pedido.detalle_pedido,
-          horaRecogida:  pedido.hora_recogida,
           notasAdmin:    pedido.notas_admin ?? null,
+          liberado:      pedido.liberado,
+          rechazado:     pedido.rechazado,
         });
       } catch (err) {
         console.error('[Socket] enviar_pedido error:', err.message, err.stack?.split('\n')[1] ?? '');

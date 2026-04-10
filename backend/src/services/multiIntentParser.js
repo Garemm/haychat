@@ -51,7 +51,7 @@ const SIGNAL_WORDS = new Set([
   'precio', 'precios', 'cuesta', 'cuanto', 'cuanta', 'cuantos', 'cuantas',
   'vale', 'cobran', 'costo', 'tarifa', 'cobras', 'cobras',
   // Schedule / location
-  'horario', 'horarios', 'hora', 'horas', 'abren', 'cierran', 'atienden',
+  'horario', 'horarios', 'hora', 'horas', 'abren', 'cierran', 'atienden', 'abres', 'abre',
   'donde', 'ubicacion', 'direccion', 'llegar', 'llegan', 'mapa',
   // Catalog / search
   'tienen', 'tienes', 'hay', 'venden', 'vende', 'vendes',

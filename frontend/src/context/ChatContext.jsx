@@ -66,7 +66,7 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
   }, [businessId]);
 
   /** Merge admin update fields into the existing receipt card. */
-  const updatePedidoReceipt = useCallback(({ id, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin }) => {
+  const updatePedidoReceipt = useCallback(({ id, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin, liberado, rechazado }) => {
     setPedidoFormState((prev) => {
       if (!prev?.submitted || prev.pedido?.id !== id) return prev;
       return {
@@ -79,6 +79,8 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
           detallePedido: detallePedido !== undefined ? detallePedido : prev.pedido.detallePedido,
           horaRecogida:  horaRecogida  !== undefined ? horaRecogida  : prev.pedido.horaRecogida,
           notasAdmin:    notasAdmin    !== undefined ? notasAdmin    : prev.pedido.notasAdmin,
+          liberado:      liberado      !== undefined ? liberado      : prev.pedido.liberado,
+          rechazado:     rechazado     !== undefined ? rechazado     : prev.pedido.rechazado,
         },
       };
     });

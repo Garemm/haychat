@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import socketService from '../../services/socketService';
 import { useChat } from '../../context/ChatContext';
@@ -17,7 +17,7 @@ const cardVariants = {
   },
 };
 
-const INITIAL = { nombreCliente: '', telefono: '', detallePedido: '', horaRecogida: '' };
+const INITIAL = { nombreCliente: '', telefono: '', detallePedido: '' };
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -53,7 +53,13 @@ const ReadField = ({ label, value, multiline = false }) => (
 // ─── Receipt card ─────────────────────────────────────────────────────────────
 
 const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
-  const { id, fecha, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin } = pedido;
+  const { id, fecha, aceptado, nombreCliente, telefono, detallePedido, notasAdmin, liberado, rechazado } = pedido;
+
+  const [editing,    setEditing]    = useState(false);
+  const [editFields, setEditFields] = useState({});
+  const [editErrors, setEditErrors] = useState({});
+  const [saving,     setSaving]     = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // Always fetch fresh data from the DB on mount + poll while pending + on tab focus
   const refresh = async () => {
@@ -70,15 +76,17 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
         detallePedido: data.detalle_pedido,
         horaRecogida:  data.hora_recogida,
         notasAdmin:    data.notas_admin ?? null,
+        liberado:      data.liberado,
+        rechazado:     data.rechazado,
       });
     } catch { /* silent */ }
   };
 
   useEffect(() => {
-    refresh(); // load latest on every mount (covers page-reload case)
+    refresh();
 
-    if (aceptado === true) return;
-    const interval = setInterval(refresh, 15_000);
+    if (liberado === true || rechazado === true) return;
+    const interval = setInterval(refresh, 8_000);
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -86,7 +94,239 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
       document.removeEventListener('visibilitychange', onVisible);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, aceptado]);
+  }, [id, liberado, rechazado]);
+
+  // ── Edit helpers ────────────────────────────────────────────────────────────
+
+  const startEdit = () => {
+    setEditFields({ nombreCliente, telefono, detallePedido });
+    setEditErrors({});
+    setEditing(true);
+  };
+
+  const handleEditChange = (e) => {
+    const { name, value } = e.target;
+    setEditFields((prev) => ({ ...prev, [name]: value }));
+    setEditErrors((prev) => ({ ...prev, [name]: '' }));
+  };
+
+  const validateEdit = () => {
+    const errors = {};
+    if (!editFields.nombreCliente?.trim())               errors.nombreCliente  = 'Campo requerido';
+    if (!editFields.telefono?.trim())                    errors.telefono       = 'Campo requerido';
+    if (!editFields.detallePedido?.trim())               errors.detallePedido  = 'Campo requerido';
+    if (editFields.nombreCliente?.trim().length  > 150)  errors.nombreCliente  = 'Máx. 150 caracteres';
+    if (editFields.telefono?.trim().length       > 50)   errors.telefono       = 'Máx. 50 caracteres';
+    if (editFields.detallePedido?.trim().length  > 2000) errors.detallePedido  = 'Máx. 2000 caracteres';
+    return errors;
+  };
+
+  const handleUpdate = async () => {
+    const errors = validateEdit();
+    if (Object.keys(errors).length > 0) { setEditErrors(errors); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/pedidos/${id}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombreCliente: editFields.nombreCliente.trim(),
+          telefono:      editFields.telefono.trim(),
+          detallePedido: editFields.detallePedido.trim(),
+        }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        if (data) {
+          updatePedidoReceipt({
+            id:            data.id,
+            aceptado:      data.aceptado,
+            nombreCliente: data.nombre_cliente,
+            telefono:      data.telefono,
+            detallePedido: data.detalle_pedido,
+            horaRecogida:  data.hora_recogida,
+            notasAdmin:    data.notas_admin ?? null,
+            liberado:      data.liberado,
+            rechazado:     data.rechazado,
+          });
+        }
+        setEditing(false);
+      }
+    } catch { /* silent */ } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Cancel pedido ───────────────────────────────────────────────────────────
+
+  const handleCancelPedido = async () => {
+    setCancelling(true);
+    try {
+      await fetch(`/api/pedidos/${id}`, { method: 'DELETE' });
+    } catch { /* silent */ } finally {
+      onClose();
+    }
+  };
+  if (rechazado === true) {
+    return (
+      <motion.div
+        className="of-rechazado"
+        variants={cardVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <span>❌ Tu pedido fue rechazado</span>
+        {notasAdmin && (
+          <p className="of-rechazado__notas">{notasAdmin}</p>
+        )}
+      </motion.div>
+    );
+  }
+  // ── Liberado state ──────────────────────────────────────────────────────────
+
+  if (liberado === true) {
+    return (
+      <motion.div
+        className="of-liberado"
+        variants={cardVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <span>✅ Tu pedido ya fue liberado</span>
+        {notasAdmin && (
+          <p className="of-liberado__notas">Administrador: {notasAdmin}</p>
+        )}
+      </motion.div>
+    );
+  }
+
+  // ── Edit mode ───────────────────────────────────────────────────────────────
+
+  if (editing) {
+    return (
+      <motion.div
+        className="of-card of-card--receipt"
+        variants={cardVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="of-header">
+          <div className="of-header__icon">✏️</div>
+          <div className="of-header__titles">
+            <span className="of-header__title">Editar pedido</span>
+            <span className="of-header__sub">#{id}</span>
+          </div>
+        </div>
+
+        <div className="of-fields">
+
+          {/* Nombre */}
+          <div className="of-field">
+            <label className="of-label">Nombre</label>
+            <input
+              type="text"
+              name="nombreCliente"
+              className={`of-input${editErrors.nombreCliente ? ' of-input--error' : ''}`}
+              value={editFields.nombreCliente ?? ''}
+              onChange={handleEditChange}
+              maxLength={150}
+              autoComplete="name"
+              disabled={saving}
+            />
+            <AnimatePresence>
+              {editErrors.nombreCliente && (
+                <motion.span className="of-error"
+                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}>
+                  {editErrors.nombreCliente}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Teléfono - edit mode */}
+          <div className="of-field">
+            <label className="of-label">Teléfono</label>
+            <input
+              type="tel"
+              inputMode="numeric"
+              name="telefono"
+              className={`of-input${editErrors.telefono ? ' of-input--error' : ''}`}
+              value={editFields.telefono ?? ''}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, '');
+                setEditFields((prev) => ({ ...prev, telefono: v }));
+                setEditErrors((prev) => ({ ...prev, telefono: '' }));
+              }}
+              maxLength={50}
+              autoComplete="tel"
+              disabled={saving}
+            />
+            <AnimatePresence>
+              {editErrors.telefono && (
+                <motion.span className="of-error"
+                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}>
+                  {editErrors.telefono}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Detalle */}
+          <div className="of-field">
+            <label className="of-label">Detalle del pedido</label>
+            <textarea
+              name="detallePedido"
+              className={`of-input of-input--textarea${editErrors.detallePedido ? ' of-input--error' : ''}`}
+              value={editFields.detallePedido ?? ''}
+              onChange={handleEditChange}
+              maxLength={2000}
+              rows={3}
+              disabled={saving}
+            />
+            <AnimatePresence>
+              {editErrors.detallePedido && (
+                <motion.span className="of-error"
+                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}>
+                  {editErrors.detallePedido}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
+
+        </div>
+
+        <div className="of-actions">
+          <button
+            type="button"
+            className="of-btn of-btn--ghost"
+            onClick={() => setEditing(false)}
+            disabled={saving}
+          >
+            Cancelar edición
+          </button>
+          <motion.button
+            type="button"
+            className="of-btn of-btn--primary"
+            onClick={handleUpdate}
+            disabled={saving}
+            whileHover={!saving ? { y: -2, boxShadow: '0 8px 24px rgba(91,80,245,0.38)' } : {}}
+            whileTap={!saving ? { scale: 0.97 } : {}}
+            transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+          >
+            {saving ? <span className="of-btn__spinner" /> : 'Actualizar'}
+          </motion.button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // ── Receipt view ────────────────────────────────────────────────────────────
 
   return (
     <motion.div
@@ -102,16 +342,14 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
           <span className="of-header__title">Tu pedido</span>
           <span className="of-header__sub">#{id} · {fecha}</span>
         </div>
-
       </div>
 
       <StatusBadge aceptado={aceptado} />
 
       <div className="of-fields">
-        <ReadField label="Nombre"           value={nombreCliente} />
-        <ReadField label="Teléfono"         value={telefono} />
-        <ReadField label="Detalle"          value={detallePedido} multiline />
-        <ReadField label="Hora de recogida" value={horaRecogida} />
+        <ReadField label="Nombre"   value={nombreCliente} />
+        <ReadField label="Teléfono" value={telefono} />
+        <ReadField label="Detalle"  value={detallePedido} multiline />
 
         {notasAdmin && (
           <div className="of-notas">
@@ -120,6 +358,28 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
           </div>
         )}
       </div>
+
+      {!rechazado && (
+        <div className="of-actions of-actions--receipt">
+          {!aceptado && (
+            <button
+              type="button"
+              className="of-btn of-btn--danger"
+              onClick={handleCancelPedido}
+              disabled={cancelling}
+            >
+              {cancelling ? <span className="of-btn__spinner of-btn__spinner--dark" /> : 'Cancelar pedido'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="of-btn of-btn--ghost"
+            onClick={startEdit}
+          >
+            ✏️ Editar
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 };
@@ -154,11 +414,9 @@ const OrderForm = () => {
     if (!fields.nombreCliente.trim())               errors.nombreCliente  = 'Campo requerido';
     if (!fields.telefono.trim())                    errors.telefono       = 'Campo requerido';
     if (!fields.detallePedido.trim())               errors.detallePedido  = 'Campo requerido';
-    if (!fields.horaRecogida.trim())                errors.horaRecogida   = 'Campo requerido';
     if (fields.nombreCliente.trim().length  > 150)  errors.nombreCliente  = 'Máx. 150 caracteres';
     if (fields.telefono.trim().length       > 50)   errors.telefono       = 'Máx. 50 caracteres';
     if (fields.detallePedido.trim().length  > 2000) errors.detallePedido  = 'Máx. 2000 caracteres';
-    if (fields.horaRecogida.trim().length   > 50)   errors.horaRecogida   = 'Máx. 50 caracteres';
     return errors;
   };
 
@@ -173,7 +431,6 @@ const OrderForm = () => {
       nombreCliente: fields.nombreCliente.trim(),
       telefono:      fields.telefono.trim(),
       detallePedido: fields.detallePedido.trim(),
-      horaRecogida:  fields.horaRecogida.trim(),
     });
     setTimeout(() => setSubmitting(false), 8000);
   };
@@ -240,11 +497,16 @@ const OrderForm = () => {
             <input
               id="of-telefono"
               type="tel"
+              inputMode="numeric"
               name="telefono"
               className={`of-input${fieldErrors.telefono ? ' of-input--error' : ''}`}
               placeholder="Tu número de contacto"
               value={fields.telefono}
-              onChange={handleChange}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, '');
+                setFields((prev) => ({ ...prev, telefono: v }));
+                setFieldErrors((prev) => ({ ...prev, telefono: '' }));
+              }}
               maxLength={50}
               autoComplete="tel"
               disabled={submitting}
@@ -285,30 +547,9 @@ const OrderForm = () => {
             </AnimatePresence>
           </div>
 
-          {/* Hora */}
-          <div className="of-field">
-            <label className="of-label" htmlFor="of-hora">Hora de recogida</label>
-            <input
-              id="of-hora"
-              type="text"
-              name="horaRecogida"
-              className={`of-input${fieldErrors.horaRecogida ? ' of-input--error' : ''}`}
-              placeholder="Ej: 2:30 PM"
-              value={fields.horaRecogida}
-              onChange={handleChange}
-              maxLength={50}
-              disabled={submitting}
-            />
-            <AnimatePresence>
-              {fieldErrors.horaRecogida && (
-                <motion.span className="of-error"
-                  initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}>
-                  {fieldErrors.horaRecogida}
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </div>
+          {/* Info pago */}
+          <p className="of-info-msg">💳 Los pedidos se pagan en el establecimiento 😊</p>
+
         </div>
 
         <div className="of-actions">
