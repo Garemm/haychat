@@ -393,6 +393,8 @@ const OrderForm = () => {
   const [submitting,  setSubmitting]  = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
 
+  if (!pedidoForm) return null;
+
   if (pedidoForm?.submitted) {
     return (
       <ReceiptCard

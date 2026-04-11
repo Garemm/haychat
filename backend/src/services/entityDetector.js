@@ -829,6 +829,31 @@ function formatCategoryResponse(categoryName, rows) {
   return `En ${categoryName} tenemos ${listed}. ¿Quieres más información de alguno?`;
 }
 
+/**
+ * Formats results when the exact search phrase had no match but individual
+ * keywords did (partial / related match).
+ * @param {string} originalEntity  The full user search phrase (e.g. "escuadra metalica")
+ * @param {Array}  products        Related products found via word fallback
+ * @returns {string}
+ */
+function formatPartialMatchResponse(originalEntity, products) {
+  if (!products || products.length === 0) {
+    return `Lo siento, no encontré ningún producto relacionado con "${originalEntity}". ¿Quieres ver el catálogo completo?`;
+  }
+  if (products.length === 1) {
+    const p = products[0];
+    const priceTag = p.is_available !== false
+      ? ` a $${Number(p.price).toFixed(2)}`
+      : ` (no disponible)`;
+    return `Encontré un producto relacionado con lo que buscas: ${p.name}${priceTag}. ¿Es lo que necesitas? 😊`;
+  }
+  const available = products.filter((p) => p.is_available !== false);
+  const pool   = available.length > 0 ? available : products;
+  const sample = pool.slice(0, VOICE_LIST_LIMIT);
+  const names  = sample.map((p) => `${p.name} a $${Number(p.price).toFixed(2)}`);
+  return `Encontré productos relacionados con lo que buscas: ${_enumList(names)}. ¿Alguno te interesa?`;
+}
+
 module.exports = {
   detectEntities,
   extractEntityCandidate,
@@ -837,6 +862,7 @@ module.exports = {
   queryPromotions,
   queryServices,
   formatProductResponse,
+  formatPartialMatchResponse,
   formatCategoryResponse,
   // Exported for testing
   isBlocklisted,

@@ -579,8 +579,12 @@ describe('processMessage() — compound query strategy', () => {
     const screwRows = [
       { id: 1, name: 'Tornillos de madera', price: 0.5, is_available: true, stock_quantity: 200, category: 'Tornillería' },
     ];
-    // Layer 1 of searchByCompoundQuery hits
-    db.query.mockResolvedValueOnce({ rows: screwRows });
+    // queryCategories('tornillos') returns empty → entityTerm path (not categoryTerm)
+    // Then Layer 1 of searchByCompoundQuery hits
+    db.query
+      .mockResolvedValueOnce({ rows: [] })        // queryCategories → entityTerm path
+      .mockResolvedValueOnce({ rows: screwRows }) // Layer 1 exact phrase match
+    ;
 
     const result = await processMessage({
       text: 'tornillos de madera',
@@ -627,7 +631,12 @@ describe('processMessage() — compound query strategy', () => {
     const carneRows = [
       { id: 5, name: 'Carne de res molida', price: 12, is_available: true, stock_quantity: 20, category: 'Carnes' },
     ];
-    db.query.mockResolvedValueOnce({ rows: carneRows });
+    // queryCategories('carne') returns empty → entityTerm path (not categoryTerm)
+    // Then Layer 1 of searchByCompoundQuery hits
+    db.query
+      .mockResolvedValueOnce({ rows: [] })         // queryCategories → entityTerm path
+      .mockResolvedValueOnce({ rows: carneRows })  // Layer 1 exact phrase match
+    ;
 
     const result = await processMessage({
       text: 'carne de res',

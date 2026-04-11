@@ -74,7 +74,7 @@ const SIGNAL_WORDS = new Set([
   // "comida y bebidas" from being treated as a product-compound and not split.
   'comida', 'comer', 'snacks', 'alimentos', 'bebidas', 'bebida',
   // Price-filter words — "dame algo barato y también una bebida" should split
-  'barato', 'baratos', 'barata', 'baratas', 'economico', 'economicos',
+  'barato', 'baratos', 'barata', 'baratas', 'economico', 'economicos', 'economica', 'economicas',
 ]);
 
 /**
@@ -100,16 +100,18 @@ function hasSignal(segment) {
  */
 const CONNECTORS = [
   // ── Strong additive ───────────────────────────────────────────────────────
-  // "y también" / "también y" — always a clause boundary
-  { re: /\s+(?:y\s+también|también\s+y)\s+/,           type: 'additive',    strength: 'strong' },
-  // "además" (+ optional "de eso") — always a clause boundary
-  { re: /\s+además(?:\s+de\s+eso)?\s+/,                type: 'additive',    strength: 'strong' },
-  // "también quiero/necesito/me interesa/quisiera" — explicit desire continuation
-  { re: /\s+también\s+(?:quiero|necesito|quisiera|me\s+interesa|me\s+gustaria)\s+/, type: 'additive', strength: 'strong' },
+  // "y tambien" / "tambien y" — always a clause boundary
+  // NOTE: input is normalized (no accents), so match 'tambien' not 'también'
+  { re: /\s+(?:y\s+tambien|tambien\s+y)\s+/,           type: 'additive',    strength: 'strong' },
+  // "ademas" (+ optional "de eso") — always a clause boundary
+  // NOTE: input is normalized (no accents), so we match 'ademas' not 'además'
+  { re: /\s+ademas(?:\s+de\s+eso)?\s+/,                type: 'additive',    strength: 'strong' },
+  // "tambien quiero/necesito/me interesa/quisiera" — explicit desire continuation
+  { re: /\s+tambien\s+(?:quiero|necesito|quisiera|me\s+interesa|me\s+gustaria)\s+/, type: 'additive', strength: 'strong' },
   // "aparte (de eso)" — informal connector meaning "additionally"
   { re: /\s+aparte(?:\s+de\s+eso)?\s+/,                type: 'additive',    strength: 'strong' },
 
-  // ── Strong additive: "pero también" ───────────────────────────────────────
+  // ── Strong additive: "pero tambien" ────────────────────────────────────────
   // "En Monterrey, pero también en San Pedro" — additive despite contrastive start
   { re: /\s+pero\s+tambien\s+/,                          type: 'additive',    strength: 'strong' },
 
@@ -125,10 +127,11 @@ const CONNECTORS = [
   { re: /\s+o\s+bien\s+/,                              type: 'alternative', strength: 'strong' },
   { re: /\s+ya\s+sea\s+/,                              type: 'alternative', strength: 'strong' },
 
-  // ── Weak additive ("y", "también", "pero") ───────────────────────────────
+  // ── Weak additive ("y", "tambien", "pero") ────────────────────────────────
   // These are only split when BOTH sides independently have signal words.
+  // NOTE: input is normalized (no accents), so match 'tambien' not 'también'
   { re: /\s+y\s+/,               type: 'additive',    strength: 'weak' },
-  { re: /\s+también\s+/,         type: 'additive',    strength: 'weak' },
+  { re: /\s+tambien\s+/,         type: 'additive',    strength: 'weak' },
   { re: /\s+pero\s+/,            type: 'contrastive', strength: 'weak' },
 
   // ── Weak alternative ─────────────────────────────────────────────────────

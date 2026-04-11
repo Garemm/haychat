@@ -105,7 +105,7 @@ function shouldUseAI(normalizedText, intentResult, entityResult, context) {
   // In contrast, "la quesadilla tiene queso?" has "tiene" in the MIDDLE (not at start/end),
   // so it is correctly treated as an ingredient description and routed to AI.
   const PRODUCT_DESC_RE = /\b(?:tiene[ns]?|lleva[ns]?|contiene[ns]?|incluye[ns]?|trae[ns]?|viene[ns]?\s+con|es\s+con|viene\s+con)\b/;
-  const AVAIL_VERB_RE   = /^(?:tienes?|tienen|hay)\s+|(?:tiene[sn]?|tienen|hay)\s*\??$/;
+  const AVAIL_VERB_RE   = /^(?:tienes?|tienen|hay)\s+|(?:tiene[sn]?|tienen|hay)\s*\??$|\bsi\s+(?:tienes?|tienen|hay)\b/;
   if (!AVAIL_VERB_RE.test(normalizedText) && PRODUCT_DESC_RE.test(normalizedText)) {
     return { routing: 'ai', reason: 'product description/ingredient question', aiCategory: 'open_query' };
   }

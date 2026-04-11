@@ -30,7 +30,8 @@ const { normalize } = require('./normalize');
 const { preprocessMessage } = require('./textPreprocessor');
 const { detectNegation } = require('./textPreprocessor');
 const { detectIntent, isStandaloneIntent } = require('./intentDetector');
-const { detectEntities, queryProducts, formatProductResponse } = require('./entityDetector');
+const { detectEntities, queryProducts, queryCategories, formatProductResponse, formatPartialMatchResponse } = require('./entityDetector');
+const { getSynonymsAcrossCategories, getSynonymsByBusinessId } = require('./synonyms');
 const { detectDay } = require('./dayDetector');
 const { getContext, updateContext } = require('./sessionContextService');
 const { pushTurnMemory, addRejectedEntity } = require('./redisService');
@@ -613,22 +614,17 @@ function decide(intentResult, entityResult, context, normalizedText) {
     };
   }
 
-  // Rule 1: High-confidence standalone intent → use intent alone, ignore everything
-  if (hasIntent && standalone && highConfidence) {
-    return {
-      strategy: 'intent',
-      intent: intentResult.intent,
-      entity: { type: null, value: null },
-      usedContext: false,
-      reason: `standalone intent "${intentResult.intent}" score=${intentResult.score}`,
-    };
-  }
-
-  // Rule 1.5: AI pre-screen — recommendation/comparison patterns beat entity routing.
+  // Rule 1.5: AI pre-screen — must run BEFORE the high-confidence intent guard so
+  // recommendation/comparison/superlative signals always win, even when a standalone
+  // intent fires first.
+  //
+  // Example: "recomiendame algo rico" scores 3 on the 'comprar' intent (substring
+  // "dame" is inside "recomiendame") which would otherwise trigger Rule 1 and return
+  // strategy='intent'. The pre-screen intercepts first via RECOMMEND_RE.
+  //
   // "que me recomienda de postres?" detects entity "postres" but user wants
   // AI reasoning, not a raw catalog. Ask shouldUseAI with the real entity so
-  // the (now-fixed) decision engine can bypass the entity guard when text
-  // explicitly signals a recommendation or comparison.
+  // the decision engine can bypass the entity guard for recommendation/comparison.
   const aiPrescreen = shouldUseAI(normalizedText, intentResult, entityResult, context);
   if (aiPrescreen.routing === 'ai') {
     return {
@@ -637,6 +633,18 @@ function decide(intentResult, entityResult, context, normalizedText) {
       entity: { type: null, value: null },
       usedContext: false,
       reason: `AI pre-screen: ${aiPrescreen.reason}`,
+    };
+  }
+
+  // Rule 1: High-confidence standalone intent → use intent alone, ignore everything
+  // (only reached when the AI pre-screen above determined backend is sufficient)
+  if (hasIntent && standalone && highConfidence) {
+    return {
+      strategy: 'intent',
+      intent: intentResult.intent,
+      entity: { type: null, value: null },
+      usedContext: false,
+      reason: `standalone intent "${intentResult.intent}" score=${intentResult.score}`,
     };
   }
 
@@ -1054,12 +1062,60 @@ async function queryProductsCompoundAware(entityValue, businessId) {
         return {
           rows,
           compound: { entity: baseEntity, attribute: attrTerm, fullPhrase: entityValue },
+          partialMatch: false,
         };
       }
     } catch { /* fall through */ }
   }
   const rows = await queryProducts(entityValue, businessId);
-  return { rows, compound: null };
+  if (rows.length > 0) return { rows, compound: null, partialMatch: false };
+
+  // ── Word-by-word fallback ────────────────────────────────────────────
+  // When searching for a multi-word phrase (e.g. "escuadra metalica") returns no
+  // results, retry with each individual significant word so we surface the base
+  // product ("Escuadra de 12\"") and tell the customer it's a related match.
+  const words = entityValue.split(/\s+/).filter((w) => w.length >= 3);
+  if (words.length >= 2) {
+    for (const word of words) {
+      const fallbackRows = await queryProducts(word, businessId);
+      if (fallbackRows.length > 0) {
+        return { rows: fallbackRows, compound: null, partialMatch: true };
+      }
+    }
+  }
+
+  // ── Synonym fallback ────────────────────────────────────────────────────
+  // Last resort: swap each meaningful word for a known synonym and retry.
+  // E.g. user types "soda" → no DB match → try "refresco" / "gaseosa".
+  // A Set guards against retrying the same term twice (no infinite loops).
+  const queriedTerms = new Set([normalize(entityValue)]);
+  const candidateTerms = entityValue.split(/\s+/).filter((w) => w.length >= 3);
+  for (const term of [entityValue, ...candidateTerms]) {
+    for (const syn of await getSynonymsByBusinessId(term, businessId)) {
+      if (queriedTerms.has(syn)) continue;
+      queriedTerms.add(syn);
+
+      // 1. Try as a product name / description match
+      const synRows = await queryProducts(syn, businessId);
+      if (synRows.length > 0) {
+        return { rows: synRows, compound: null, partialMatch: true };
+      }
+
+      // 2. Try the synonym as a category name and load its products.
+      //    E.g. dulce → postre → category "Postres" → Helado de fresa, Pastel...
+      try {
+        const catRows = await queryCategories(syn, businessId);
+        if (catRows.length > 0) {
+          const catProducts = await getProductosByCategory(businessId, catRows[0].name, PAGE_SIZE, 0);
+          if (catProducts.length > 0) {
+            return { rows: catProducts, compound: null, partialMatch: true };
+          }
+        }
+      } catch { /* ignore — category lookup is best-effort */ }
+    }
+  }
+
+  return { rows: [], compound: null, partialMatch: false };
 }
 
 /**
@@ -1145,6 +1201,23 @@ async function executeDecision(decision, originalText, normalizedText, businessI
       // Standard attribute path: "algo con queso", "para madera", etc.
       const attributes = decision._attributes ?? [{ value: decision.entity.value, type: decision.entity.attributeType }];
       const { rows, strategy } = await searchByAttributes(attributes, businessId);
+
+      // Synonym fallback: attribute search found nothing, so try the attribute value
+      // as a product name through the synonym-aware pipeline.
+      // e.g. "algo con mazorca" → attribute="mazorca" → DB finds nothing →
+      //      queryProductsCompoundAware("mazorca") → synonym "elote" → found.
+      if (rows.length === 0 && attributes.length === 1) {
+        const attrTerm = attributes[0].value;
+        try {
+          const { rows: synRows, compound, partialMatch } = await queryProductsCompoundAware(attrTerm, businessId);
+          if (synRows.length > 0) {
+            if (compound) return formatCompoundQueryResponse(compound, synRows, 'entity+attribute');
+            if (partialMatch) return formatPartialMatchResponse(attrTerm, synRows);
+            return formatProductResponse(attrTerm, synRows);
+          }
+        } catch { /* synonym fallback is best-effort */ }
+      }
+
       return formatAttributeResponse(attributes, rows, strategy);
     } catch (err) {
       console.error('[Pipeline] Error in attribute search:', err.message);
@@ -1208,9 +1281,13 @@ async function executeDecision(decision, originalText, normalizedText, businessI
   // Price-specific response: intent=precios + product entity (from message OR context)
   if (decision.intent === 'precios' && decision.entity?.type === 'product' && decision.entity?.value) {
     try {
-      const { rows, compound } = await queryProductsCompoundAware(decision.entity.value, businessId);
+      const { rows, compound, partialMatch } = await queryProductsCompoundAware(decision.entity.value, businessId);
       if (rows.length === 0) {
         return `No encontré "${decision.entity.value}" en nuestro catálogo. ¿Quieres ver las opciones disponibles?`;
+      }
+      // Partial match (via word fallback): show related item instead of an exact price
+      if (partialMatch) {
+        return formatPartialMatchResponse(decision.entity.value, rows);
       }
       // Compound match with multiple results: list them so the user can narrow down.
       if (compound && rows.length > 1) {
@@ -1309,7 +1386,7 @@ async function executeDecision(decision, originalText, normalizedText, businessI
       }
 
       try {
-        const { rows, compound } = await queryProductsCompoundAware(decision.entity.value, businessId);
+        const { rows, compound, partialMatch } = await queryProductsCompoundAware(decision.entity.value, businessId);
         // Log queried products for analytics (fire-and-forget)
         const available = rows.filter((r) => r.is_available !== false);
         if (available.length > 0) {
@@ -1319,6 +1396,11 @@ async function executeDecision(decision, originalText, normalizedText, businessI
         // show filtered results using the attribute-aware format.
         if (compound) {
           return formatCompoundQueryResponse(compound, rows, 'entity+attribute');
+        }
+        // Partial match (e.g. "escuadra metalica" → found "Escuadra de 12\"") →
+        // use a "related products" message instead of the exact-match format.
+        if (partialMatch) {
+          return formatPartialMatchResponse(decision.entity.value, rows);
         }
         let response = formatProductResponse(decision.entity.value, rows);
         if (rows.length === 1) {

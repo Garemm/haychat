@@ -116,6 +116,11 @@ const ATTRIBUTE_PATTERNS = [
   { pattern: /\bque\s+teng[ao][n]?\s+(?<attr>[\wñ]+(?:\s+[\wñ]+){0,4})/, hint: 'que tenga' },
   // "algo con X" / "productos con X" / "con X"
   { pattern: /\bcon\s+(?<attr>[\wñ]+(?:\s+[\wñ]+){0,4})/, hint: 'con' },
+  // "algo picante" / "algo dulce" / "algo frio" — bare adjective after "algo"
+  // Runs after "que tenga" and "con" so "algo que tenga X" / "algo con X" are handled first.
+  // Negative lookahead skips prepositions (para/de/con/que/sin) so they fall through
+  // to their own dedicated patterns and get the correct attributeType (e.g. "use" for para).
+  { pattern: /\balgo\s+(?!(?:con|para|de|que|sin)\b)(?<attr>[\wñ]+(?:\s+[\wñ]+){0,3})/, hint: 'con' },
   // "para X" — after trigger words or standalone
   { pattern: /\bpara\s+(?<attr>[\wñ]+(?:\s+[\wñ]+){0,3})/, hint: 'para' },
   // "de X metros/cm/mm...etc" — measure only (number + unit)

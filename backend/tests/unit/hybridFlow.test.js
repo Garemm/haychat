@@ -482,6 +482,7 @@ describe('handleAIFallback()', () => {
 
   test('recommendation request with DB data → aiUsed=true', async () => {
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('products')) return { rows: [mockProduct('Pizza', 100)] };
       return { rows: [] };
     });
@@ -511,6 +512,7 @@ describe('handleAIFallback()', () => {
 
   test('comparison request with data → aiUsed=true, ragContext has products', async () => {
     db.query.mockImplementation(async (sql, params) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('ILIKE') && sql.includes('products')) {
         const search = params?.find((p) => typeof p === 'string' && p.includes('%'))?.replace(/%/g, '').toLowerCase() ?? '';
         if (search.includes('pizza')) return { rows: [mockProduct('Pizza', 100)] };
@@ -615,6 +617,7 @@ describe('processMessage() — hybrid flow', () => {
 
   test('"que me recomiendas" with products in DB → aiUsed=true', async () => {
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('products') && sql.includes('is_available')) {
         return { rows: [mockProduct('Pizza', 100), mockProduct('Hamburguesa', 120)] };
       }
@@ -674,6 +677,7 @@ describe('processMessage() — hybrid flow', () => {
 
   test('RULE: AI does NOT decide intent or entity', async () => {
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('products') && sql.includes('is_available')) {
         return { rows: [mockProduct('Item', 50)] };
       }
@@ -721,6 +725,7 @@ describe('Bug-regression: entity detection MUST NOT block AI for recommendation/
   test('"que me recomienda de postres?" → decision=ai, aiUsed=true (NOT catalog dump)', async () => {
     // Entity "postres" will be detected; recommendation pattern must win.
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('ILIKE')) return { rows: [mockProduct('Crepa de cajeta', 80, 'Postres'), mockProduct('Helado de vainilla', 45, 'Postres')] };
       if (sql.includes('is_available')) return { rows: [mockProduct('Crepa de cajeta', 80, 'Postres')] };
       if (sql.includes('DISTINCT')) return { rows: [{ category: 'Postres' }] };
@@ -744,6 +749,7 @@ describe('Bug-regression: entity detection MUST NOT block AI for recommendation/
   test('"que es mejor entre crepa de cajeta y helado de vainilla?" → decision=ai, aiUsed=true', async () => {
     // Entity may be detected for one of the products; comparison must win.
     db.query.mockImplementation(async (sql, params) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('ILIKE')) {
         const s = (params?.find((p) => typeof p === 'string' && p.includes('%')) ?? '').replace(/%/g, '').toLowerCase();
         if (s.includes('crepa')) return { rows: [mockProduct('Crepa de cajeta', 80, 'Postres')] };
@@ -816,6 +822,7 @@ describe('Bug-regression: complex questions MUST NOT reuse stale context entity'
   // DB helper that returns some products for these queries
   function mockDbWithProducts() {
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('is_available')) return { rows: [mockProduct('Taco de canasta', 15, 'Tacos'), mockProduct('Hamburguesa clasica', 90, 'Hamburguesas')] };
       if (sql.includes('ILIKE')) return { rows: [mockProduct('Taco de canasta', 15, 'Tacos')] };
       if (sql.includes('DISTINCT')) return { rows: [{ category: 'Tacos' }, { category: 'Hamburguesas' }] };
@@ -867,6 +874,7 @@ describe('Bug-regression: complex questions MUST NOT reuse stale context entity'
     const id = sid();
     await seedContext(id, 'descripcion', 'taco de canasta');
     db.query.mockImplementation(async (sql, params) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('ILIKE')) return { rows: [mockProduct('Hamburguesa clasica', 90, 'Hamburguesas')] };
       if (sql.includes('is_available')) return { rows: [mockProduct('Hamburguesa clasica', 90, 'Hamburguesas')] };
       if (sql.includes('DISTINCT')) return { rows: [{ category: 'Hamburguesas' }] };
@@ -890,6 +898,7 @@ describe('Bug-regression: complex questions MUST NOT reuse stale context entity'
     const id = sid();
     await seedContext(id, 'descripcion', 'taco de canasta');
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('is_available')) return { rows: [mockProduct('Hamburguesa clasica', 90, 'Hamburguesas')] };
       if (sql.includes('ILIKE')) return { rows: [mockProduct('Hamburguesa clasica', 90, 'Hamburguesas')] };
       if (sql.includes('DISTINCT')) return { rows: [{ category: 'Hamburguesas' }] };
@@ -939,6 +948,7 @@ describe('Bug-regression: queries after day context MUST NOT reuse day entity', 
 
   function mockDbWithPizzas() {
     db.query.mockImplementation(async (sql) => {
+      if (sql.includes('subscription_id')) return { rows: [{ subscription_id: 2 }] };
       if (sql.includes('is_available')) return { rows: [mockProduct('Pizza mexicana', 120, 'Pizzas'), mockProduct('Pizza hawaiana', 110, 'Pizzas')] };
       if (sql.includes('ILIKE')) return { rows: [mockProduct('Pizza mexicana', 120, 'Pizzas')] };
       if (sql.includes('DISTINCT')) return { rows: [{ category: 'Pizzas' }] };
