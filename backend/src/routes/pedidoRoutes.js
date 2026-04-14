@@ -29,12 +29,13 @@ router.put('/:id', async (req, res, next) => {
     return res.status(400).json({ success: false, message: 'ID de pedido inválido' });
   }
 
-  const { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado } = req.body;
+  const { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado, pedidoListo } = req.body;
 
   // At least one field must be provided
   if (aceptado === undefined && detallePedido === undefined &&
       horaRecogida === undefined && notasAdmin === undefined && liberado === undefined &&
-      nombreCliente === undefined && telefono === undefined && rechazado === undefined) {
+      nombreCliente === undefined && telefono === undefined && rechazado === undefined &&
+      pedidoListo === undefined) {
     return res.status(400).json({ success: false, message: 'No se enviaron cambios' });
   }
 
@@ -48,6 +49,7 @@ router.put('/:id', async (req, res, next) => {
       nombreCliente,
       telefono,
       rechazado,
+      pedidoListo,
     });
 
     if (!updated) {
@@ -68,6 +70,7 @@ router.put('/:id', async (req, res, next) => {
           notasAdmin:    updated.notas_admin ?? null,
           liberado:      updated.liberado,
           rechazado:     updated.rechazado,
+          pedidoListo:   updated.pedido_listo,
         });
       } catch (socketErr) {
         // Socket not initialized or room empty — non-fatal

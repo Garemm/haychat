@@ -221,6 +221,72 @@ describe('parseMultiIntent() — weak "y" connector (both sides need signal)', (
   });
 });
 
+// ─── parseMultiIntent() — implied-existence splits (no "también") ────────────
+//
+// When the left side contains an existence verb (tiene/tienes/tienen/hay/etc.)
+// and the right side is a multi-word noun phrase (≥ 2 meaningful tokens),
+// the verb is implied for the right side:
+//   "tiene hamburguesa doble y agua de jamaica?" = "¿tiene X? y ¿tiene Y?"
+// Single-word right sides (e.g. "tienen sal y pimienta") are still NOT split.
+
+describe('parseMultiIntent() — implied existence: "tiene X y <multi-word product>"', () => {
+  test('"tiene hamburguesa doble y agua de jamaica" → 2 segments', () => {
+    const result = parseMultiIntent('tiene hamburguesa doble y agua de jamaica');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toBe('tiene hamburguesa doble');
+    expect(result[1].segment).toBe('agua de jamaica');
+    expect(result[0].connectorType).toBe('primary');
+    expect(result[1].connectorType).toBe('additive');
+  });
+
+  test('"tienen pizza hawaiana y hamburguesa clasica" → 2 segments', () => {
+    const result = parseMultiIntent('tienen pizza hawaiana y hamburguesa clasica');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('pizza');
+    expect(result[1].segment).toContain('hamburguesa');
+  });
+
+  test('"hay agua de jamaica y pozole rojo" → 2 segments', () => {
+    const result = parseMultiIntent('hay agua de jamaica y pozole rojo');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('jamaica');
+    expect(result[1].segment).toContain('pozole');
+  });
+
+  test('"venden tacos de pastor y agua fresca" → 2 segments', () => {
+    const result = parseMultiIntent('venden tacos de pastor y agua fresca');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('tacos');
+    expect(result[1].segment).toContain('agua');
+  });
+
+  test('"tienen arroz con leche y flan napolitano" → 2 segments', () => {
+    const result = parseMultiIntent('tienen arroz con leche y flan napolitano');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('arroz');
+    expect(result[1].segment).toContain('flan');
+  });
+
+  // Single-word right side: compound name guard must still hold
+  test('"tienen sal y pimienta" → NOT split (right side is 1 token)', () => {
+    const result = parseMultiIntent('tienen sal y pimienta');
+    expect(result).toHaveLength(1);
+    expect(result[0].segment).toBe('tienen sal y pimienta');
+  });
+
+  test('"tienen agua y limon" → NOT split (right side is 1 token)', () => {
+    const result = parseMultiIntent('tienen agua y limon');
+    expect(result).toHaveLength(1);
+  });
+
+  // "quiero" is NOT in EXISTENCE_VERBS → no implied-existence split
+  test('"quiero una pizza y coca cola" → NOT split (quiero is not an existence verb)', () => {
+    const result = parseMultiIntent('quiero una pizza y coca cola');
+    expect(result).toHaveLength(1);
+    expect(result[0].segment).toContain('pizza');
+  });
+});
+
 // ─── parseMultiIntent() — "pero" contrastive splits ─────────────────────────
 
 describe('parseMultiIntent() — "pero" connector', () => {

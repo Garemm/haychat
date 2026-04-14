@@ -1336,7 +1336,33 @@ async function executeDecision(decision, originalText, normalizedText, businessI
           const attrsMap = await getProductAttributes([rows[0].id]);
           response += formatProductAttributes(attrsMap, rows[0].id);
         } catch { /* attributes are optional */ }
+        return response;
       }
+      // No product found — try matching against business services as a fallback
+      try {
+        const allServices = await getBusinessInfoByIntent('servicios', businessId);
+        const normQuery   = normalize(decision.entity.value);
+        let serviceMatch  = allServices.find((s) => {
+          const normName = normalize(s.name);
+          return normName.includes(normQuery) || normQuery.includes(normName);
+        });
+        if (!serviceMatch) {
+          const qWords = normQuery.split(/\s+/).filter((w) => w.length > 2);
+          serviceMatch = allServices.find((s) => {
+            const nameWords = new Set(normalize(s.name).split(/\s+/));
+            const overlap   = qWords.filter((w) => nameWords.has(w));
+            return qWords.length > 0 && overlap.length >= Math.ceil(qWords.length / 2);
+          });
+        }
+        if (serviceMatch) {
+          try {
+            const contactInfo = await getBusinessInfoByIntent('contacto', businessId);
+            return formatServiceWithContact(serviceMatch, contactInfo);
+          } catch {
+            return formatServiceDetail(serviceMatch);
+          }
+        }
+      } catch { /* service fallback is best-effort */ }
       return response;
     } catch (err) {
       console.error('[Pipeline] Error querying description:', err.message);
@@ -1405,7 +1431,10 @@ async function executeDecision(decision, originalText, normalizedText, businessI
 
       try {
         const { rows, compound, partialMatch } = await queryProductsCompoundAware(decision.entity.value, businessId);
-        // Log queried products for analytics (fire-and-forget)
+        // Log every specific product query as an individual event.
+        // Category and general catalog queries never reach this block — they are handled
+        // by the category branch above (decision.entity.type === 'category') or by the
+        // intent-only path, so no further filtering is needed here.
         const available = rows.filter((r) => r.is_available !== false);
         if (available.length > 0) {
           logProductQuery(businessId, available.map((r) => r.id));

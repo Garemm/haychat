@@ -39,7 +39,7 @@ const PedidoModel = {
       `INSERT INTO pedidos
          (business_id, session_id, nombre_cliente, telefono, detalle_pedido)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado`,
+       RETURNING id, session_id, nombre_cliente, telefono, detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado, pedido_listo`,
       [businessId, sessionId ?? null, nombreCliente, telefono, detallePedido]
     );
     return result.rows[0];
@@ -52,7 +52,7 @@ const PedidoModel = {
   async getPedidoById(id) {
     const result = await db.query(
       `SELECT id, business_id, session_id, nombre_cliente, telefono,
-              detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado, created_at
+              detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado, pedido_listo, created_at
        FROM pedidos
        WHERE id = $1`,
       [id]
@@ -67,7 +67,7 @@ const PedidoModel = {
    * @param {{ aceptado?: boolean, detallePedido?: string, horaRecogida?: string, notasAdmin?: string }} fields
    * @returns {object|null} Updated row, or null if not found.
    */
-  async updatePedido(id, { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado } = {}) {
+  async updatePedido(id, { aceptado, detallePedido, horaRecogida, notasAdmin, liberado, nombreCliente, telefono, rechazado, pedidoListo } = {}) {
     const sets   = [];
     const params = [];
     let   idx    = 1;
@@ -80,6 +80,7 @@ const PedidoModel = {
     if (nombreCliente !== undefined) { sets.push(`nombre_cliente = $${idx++}`);  params.push(nombreCliente); }
     if (telefono      !== undefined) { sets.push(`telefono = $${idx++}`);        params.push(telefono); }
     if (rechazado     !== undefined) { sets.push(`rechazado = $${idx++}`);       params.push(rechazado); }
+    if (pedidoListo   !== undefined) { sets.push(`pedido_listo = $${idx++}`);    params.push(pedidoListo); }
 
     if (sets.length === 0) return null;
 
@@ -89,7 +90,7 @@ const PedidoModel = {
        SET ${sets.join(', ')}
        WHERE id = $${idx}
        RETURNING id, business_id, session_id, nombre_cliente, telefono,
-                 detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado`,
+                 detalle_pedido, hora_recogida, fecha, aceptado, notas_admin, liberado, rechazado, pedido_listo`,
 
       params
     );

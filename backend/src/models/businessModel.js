@@ -353,7 +353,7 @@ const BusinessModel = {
    */
   async getByUuid(chatUuid) {
     const result = await db.query(
-      `SELECT id, name, city
+      `SELECT id, name, city, acepto_pedidos
        FROM businesses
        WHERE chat_uuid = $1`,
       [chatUuid]

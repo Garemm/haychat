@@ -106,10 +106,11 @@ const ChatPage = () => {
   const { chatUuid } = useParams();
   const { state }    = useLocation();
 
-  const [bizId,        setBizId]        = useState(null);
-  const [businessName, setBusinessName] = useState(state?.name || '');
-  const [loading,      setLoading]      = useState(true);
-  const [notFound,     setNotFound]     = useState(false);
+  const [bizId,         setBizId]         = useState(null);
+  const [businessName,  setBusinessName]  = useState(state?.name || '');
+  const [aceptoPedidos, setAceptoPedidos] = useState(false);
+  const [loading,       setLoading]       = useState(true);
+  const [notFound,      setNotFound]      = useState(false);
 
   useEffect(() => {
     fetch(`/api/business/by-uuid/${encodeURIComponent(chatUuid)}`)
@@ -122,6 +123,7 @@ const ChatPage = () => {
         if (!json) return;
         setBizId(json.data.id);
         if (!businessName) setBusinessName(json.data.name);
+        setAceptoPedidos(json.data.acepto_pedidos === true);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -133,7 +135,7 @@ const ChatPage = () => {
   if (notFound)  return <Navigate to="/" replace />;
 
   return (
-    <ChatProvider businessId={bizId} businessName={businessName}>
+    <ChatProvider businessId={bizId} businessName={businessName} aceptoPedidos={aceptoPedidos}>
       <ChatContent businessName={businessName} />
     </ChatProvider>
   );

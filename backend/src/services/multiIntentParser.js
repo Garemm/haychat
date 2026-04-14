@@ -54,7 +54,7 @@ const SIGNAL_WORDS = new Set([
   'horario', 'horarios', 'hora', 'horas', 'abren', 'cierran', 'atienden', 'abres', 'abre',
   'donde', 'ubicacion', 'direccion', 'llegar', 'llegan', 'mapa',
   // Catalog / search
-  'tienen', 'tienes', 'hay', 'venden', 'vende', 'vendes',
+  'tiene', 'tienen', 'tienes', 'hay', 'venden', 'vende', 'vendes',
   'existe', 'existen', 'disponible', 'disponibles', 'stock',
   'busco', 'buscar', 'quiero', 'necesito', 'catalogo', 'menu', 'lista',
   // Promotions
@@ -122,6 +122,49 @@ function startsWithInterrogative(segment) {
  */
 function hasSignalOrClause(segment) {
   return hasSignal(segment) || startsWithInterrogative(segment);
+}
+
+/**
+ * Existence-query verbs — the user is asking whether a product/item exists.
+ * When a left segment contains one of these, a bare noun phrase on the right
+ * is an implied parallel existence query ("tienen X y Y?" = "tienen X? y tienen Y?").
+ */
+const EXISTENCE_VERBS = new Set([
+  'tiene', 'tienes', 'tienen',
+  'hay',
+  'vende', 'vendes', 'venden',
+  'existe', 'existen',
+]);
+
+/** Articles that should not count as "meaningful" tokens in a noun phrase. */
+const _NP_ARTICLES = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas']);
+
+/**
+ * Returns true when `segment` contains an existence-query verb.
+ * Works for both leading position ("tienen X") and embedded ("de casualidad tienen X").
+ * @param {string} segment
+ * @returns {boolean}
+ */
+function isExistenceQuery(segment) {
+  return segment.split(/\s+/).some((w) => EXISTENCE_VERBS.has(w));
+}
+
+/**
+ * Returns true when `segment` is a plausible bare noun phrase with at least
+ * 2 non-article tokens — indicating the user meant to list a second item
+ * rather than complete a compound product name.
+ *
+ * Single-word right sides (e.g. "pimienta" in "tienen sal y pimienta") return
+ * false so compound product names are never accidentally split.
+ *
+ * @param {string} segment
+ * @returns {boolean}
+ */
+function isMultiWordNounPhrase(segment) {
+  const tokens = segment.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length < 2) return false;
+  const meaningful = tokens.filter((t) => !_NP_ARTICLES.has(t));
+  return meaningful.length >= 2;
 }
 
 // ─── Connector definitions ────────────────────────────────────────────────────
@@ -208,6 +251,15 @@ function findSplit(text) {
     // Weak connector — require signal presence
     const leftHas  = hasSignal(left);
     const rightHas = hasSignalOrClause(right);
+
+    // Implied-existence exception:
+    //   "tienen hamburguesa doble y agua de jamaica?"
+    //   Left has an existence verb → the verb is implicit for the right side too.
+    //   Guard: right must be a multi-word noun phrase (≥ 2 meaningful tokens) so
+    //   single-word continuations like "tienen sal y pimienta" are never split.
+    if (leftHas && !rightHas && isExistenceQuery(left) && isMultiWordNounPhrase(right)) {
+      return { left, right, type };
+    }
 
     // For short messages (≤ 7 words) both sides must have signals
     if (wordCount <= 7 && !(leftHas && rightHas)) continue;

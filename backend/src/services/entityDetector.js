@@ -65,6 +65,12 @@ const ENTITY_STOPWORDS = new Set([
 /**
  * Generic / meta words that are NEVER valid entity names.
  * If the entire extracted entity is one of these → reject.
+ *
+ * NOTE: words in this set block only when they ARE the complete entity value.
+ * They do NOT block multi-word phrases that contain them as a sub-token
+ * (e.g. "menu especial empresarial" is a valid service name even though
+ * standalone "menu" is blocked). Per-token blocking is handled separately
+ * by ENTITY_TOKEN_BLOCKLIST below.
  */
 const ENTITY_BLOCKLIST = new Set([
   'producto', 'productos', 'articulo', 'articulos',
@@ -73,33 +79,58 @@ const ENTITY_BLOCKLIST = new Set([
   'servicio', 'servicios', 'oferta', 'ofertas',
   'algo', 'todo', 'nada', 'mucho', 'poco',
   'promocion', 'promociones', 'descuento', 'descuentos',
-  // Intent-domain words — these are intent names, not valid product entities.
-  // Without blocking them, "que horarios tienen?" would extract "horarios" as
-  // a false product entity and override the correct intent routing.
   'horario', 'horarios',
-  'precios',          // singular 'precio' already covered below
+  'precios',
   'ubicacion', 'ubicaciones',
-  // Verb forms — Compromise NLP can extract conjugated verb stems as nouns
-  // (e.g. "tienen" from "que promociones tienen"). Block all common forms.
   'tiene', 'tienen', 'tienes', 'tener',
   'hay', 'haber',
-  // Question words — never entity names
   'cuanto', 'cuanta', 'cuantos', 'cuantas',
   'cuando', 'donde', 'como', 'cual', 'cuales', 'quien',
   'que', 'precio', 'costo', 'tarifa',
-  // Command verbs — imperative forms that trigger actions but are never entities
   'muestrame', 'dame', 'pasame', 'mandame', 'enviame',
-  // Freestanding prepositions / affirmations that NLP misidentifies as nouns
   'sobre', 'acerca', 'si',
-  // List connector — "y" inside an extracted entity means the pattern captured
-  // multiple items (e.g. "hamburguesa doble y soda"); that is never a valid
-  // single product name so we block the whole candidate.
   'y',
+]);
+
+/**
+ * Words that poison a candidate even when they appear as a single TOKEN
+ * within a multi-word phrase. These are grammar glue, intent-domain keywords,
+ * verbs, and question words that can never be part of a valid product or
+ * service name.
+ *
+ * Words that CAN appear as a prefix in legitimate names (e.g. "menu especial
+ * empresarial", "servicio de renta", "catalogo de herramientas") must NOT be
+ * included here — they stay in ENTITY_BLOCKLIST as standalone-only guards.
+ */
+const ENTITY_TOKEN_BLOCKLIST = new Set([
+  // Generic commodity nouns — always meta-references, never actual item names
+  'producto', 'productos', 'articulo', 'articulos',
+  'item', 'items', 'cosa', 'cosas', 'mercancia',
+  'algo', 'todo', 'nada', 'mucho', 'poco',
+  // Conjunction indicating two items were captured together ("hamburguesa y soda")
+  'y',
+  // Intent-domain / meta words
+  'precio', 'precios', 'tarifa', 'costo',
+  'horario', 'horarios',
+  'ubicacion', 'ubicaciones',
+  'descuento', 'descuentos',
+  'promocion', 'promociones',
+  // Question words
+  'cuanto', 'cuanta', 'cuantos', 'cuantas',
+  'cuando', 'donde', 'como', 'cual', 'cuales', 'quien',
+  'que',
+  // Verb forms
+  'tiene', 'tienen', 'tienes', 'tener',
+  'hay', 'haber',
+  // Command verbs
+  'muestrame', 'dame', 'pasame', 'mandame', 'enviame',
+  // Particles
+  'sobre', 'acerca', 'si',
 ]);
 
 function isBlocklisted(entity) {
   if (ENTITY_BLOCKLIST.has(entity)) return true;
-  return entity.split(/\s+/).some((w) => ENTITY_BLOCKLIST.has(w));
+  return entity.split(/\s+/).some((w) => ENTITY_TOKEN_BLOCKLIST.has(w));
 }
 
 function stripLeadingStopwords(entity) {

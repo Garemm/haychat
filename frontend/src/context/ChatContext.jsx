@@ -3,7 +3,7 @@ import socketService from '../services/socketService';
 
 const ChatContext = createContext(null);
 
-export const ChatProvider = ({ children, businessId, businessName = '' }) => {
+export const ChatProvider = ({ children, businessId, businessName = '', aceptoPedidos = false }) => {
   const [messages, setMessages]       = useState([]);
   // roomId único por sesión: evita que dos dispositivos compartan la misma sala Socket.io
   const [roomId, setRoomId]           = useState(() => `${businessId}:${socketService.getSessionId()}`);
@@ -17,12 +17,24 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
   //   { businessId, submitted: true, pedido }  → receipt mode (order sent, showing status card)
   //     pedido: { id, fecha, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin }
   const _pedidoStorageKey = `pedidoReceipt:${businessId}:${socketService.getSessionId()}`;
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   const [pedidoForm, setPedidoFormState] = useState(() => {
     try {
       const stored = localStorage.getItem(`pedidoReceipt:${businessId}:${socketService.getSessionId()}`);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.submitted && parsed?.pedido?.id) return parsed;
+        if (parsed?.submitted && parsed?.pedido?.id) {
+          // Auto-expire any receipt older than 6 hours (from submission)
+          if (parsed.pedido.submittedAt) {
+            if (Date.now() - parsed.pedido.submittedAt >= SIX_HOURS_MS) return null;
+          }
+          // Auto-expire liberado receipts older than 2 hours
+          if (parsed.pedido.liberado && parsed.pedido.liberadoAt) {
+            if (Date.now() - parsed.pedido.liberadoAt >= TWO_HOURS_MS) return null;
+          }
+          return parsed;
+        }
       }
     } catch { /* ignore parse errors */ }
     return null;
@@ -55,20 +67,30 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
     }
   }, [pedidoForm, _pedidoStorageKey]);
 
-  const setPedidoForm   = useCallback((data) => setPedidoFormState(data), []);
+  const setPedidoForm = useCallback((data) => {
+    // Never open a new form while a submitted receipt is still live
+    if (data !== null) {
+      setPedidoFormState((prev) => (prev?.submitted ? prev : data));
+    } else {
+      setPedidoFormState(null);
+    }
+  }, []);
   const clearPedidoForm = useCallback(() => setPedidoFormState(null), []);
 
   /** Transition form → receipt card after successful submission. */
   const setPedidoSubmitted = useCallback((pedido) => {
     setPedidoFormState((prev) =>
-      prev ? { ...prev, submitted: true, pedido } : { businessId, submitted: true, pedido }
+      prev ? { ...prev, submitted: true, pedido: { ...pedido, submittedAt: Date.now() } }
+           : { businessId, submitted: true, pedido: { ...pedido, submittedAt: Date.now() } }
     );
   }, [businessId]);
 
   /** Merge admin update fields into the existing receipt card. */
-  const updatePedidoReceipt = useCallback(({ id, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin, liberado, rechazado }) => {
+  const updatePedidoReceipt = useCallback(({ id, aceptado, nombreCliente, telefono, detallePedido, horaRecogida, notasAdmin, liberado, rechazado, pedidoListo }) => {
     setPedidoFormState((prev) => {
       if (!prev?.submitted || prev.pedido?.id !== id) return prev;
+      const wasLiberado = prev.pedido.liberado;
+      const nowLiberado = liberado !== undefined ? liberado : wasLiberado;
       return {
         ...prev,
         pedido: {
@@ -79,12 +101,37 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
           detallePedido: detallePedido !== undefined ? detallePedido : prev.pedido.detallePedido,
           horaRecogida:  horaRecogida  !== undefined ? horaRecogida  : prev.pedido.horaRecogida,
           notasAdmin:    notasAdmin    !== undefined ? notasAdmin    : prev.pedido.notasAdmin,
-          liberado:      liberado      !== undefined ? liberado      : prev.pedido.liberado,
+          liberado:      nowLiberado,
           rechazado:     rechazado     !== undefined ? rechazado     : prev.pedido.rechazado,
+          pedidoListo:   pedidoListo   !== undefined ? pedidoListo   : prev.pedido.pedidoListo,
+          // Record the moment it was first liberado (to drive the 2-hour auto-expire)
+          liberadoAt:    (!wasLiberado && nowLiberado) ? Date.now() : prev.pedido.liberadoAt,
         },
       };
     });
   }, []);
+
+  // Auto-clear the receipt 6 hours after submission (client-side timestamp)
+  useEffect(() => {
+    const submittedAt = pedidoForm?.pedido?.submittedAt;
+    if (!submittedAt) return;
+    const remaining = SIX_HOURS_MS - (Date.now() - submittedAt);
+    if (remaining <= 0) { setPedidoFormState(null); return; }
+    const t = setTimeout(() => setPedidoFormState(null), remaining);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoForm?.pedido?.submittedAt]);
+
+  // Auto-clear the receipt 2 hours after it was liberado
+  useEffect(() => {
+    const pedido = pedidoForm?.pedido;
+    if (!pedido?.liberado || !pedido?.liberadoAt) return;
+    const remaining = TWO_HOURS_MS - (Date.now() - pedido.liberadoAt);
+    if (remaining <= 0) { setPedidoFormState(null); return; }
+    const t = setTimeout(() => setPedidoFormState(null), remaining);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoForm?.pedido?.liberado, pedidoForm?.pedido?.liberadoAt]);
 
   return (
     <ChatContext.Provider
@@ -95,6 +142,7 @@ export const ChatProvider = ({ children, businessId, businessName = '' }) => {
         typingUsers,
         businessId,
         businessName,
+        aceptoPedidos,
         voiceEnabled,
         pedidoForm,
         setRoomId,

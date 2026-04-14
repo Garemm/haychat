@@ -30,6 +30,7 @@ const useSocket = () => {
     roomId,
     username,
     businessId,
+    pedidoForm,
     addMessage,
     setHistory,
     addTypingUser,
@@ -79,6 +80,8 @@ const useSocket = () => {
     // ── Purchase flow events ─────────────────────────────────────────────────
     // Server confirmed orders are open → show the order form inside the chat
     const onMostrarFormulario = ({ businessId: bId }) => {
+      // Ignore if a submitted receipt is already visible
+      if (pedidoForm?.submitted) return;
       setPedidoForm({ businessId: bId });
     };
 
@@ -155,6 +158,8 @@ const useSocket = () => {
 
   /** Asks the server whether purchase orders are enabled for this business. */
   const solicitarCompra = () => {
+    // Block if a submitted receipt is already on screen
+    if (pedidoForm?.submitted) return;
     socketService.getSocket().emit('solicitar_compra', { businessId });
   };
 

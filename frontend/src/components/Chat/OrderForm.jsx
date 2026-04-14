@@ -53,7 +53,7 @@ const ReadField = ({ label, value, multiline = false }) => (
 // ─── Receipt card ─────────────────────────────────────────────────────────────
 
 const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
-  const { id, fecha, aceptado, nombreCliente, telefono, detallePedido, notasAdmin, liberado, rechazado } = pedido;
+  const { id, fecha, aceptado, nombreCliente, telefono, detallePedido, notasAdmin, liberado, rechazado, pedidoListo } = pedido;
 
   const [editing,    setEditing]    = useState(false);
   const [editFields, setEditFields] = useState({});
@@ -78,6 +78,7 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
         notasAdmin:    data.notas_admin ?? null,
         liberado:      data.liberado,
         rechazado:     data.rechazado,
+        pedidoListo:   data.pedido_listo,
       });
     } catch { /* silent */ }
   };
@@ -85,7 +86,7 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
   useEffect(() => {
     refresh();
 
-    if (liberado === true || rechazado === true) return;
+    if (liberado === true || rechazado === true || pedidoListo === true) return;
     const interval = setInterval(refresh, 8_000);
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisible);
@@ -94,7 +95,7 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
       document.removeEventListener('visibilitychange', onVisible);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, liberado, rechazado]);
+  }, [id, liberado, rechazado, pedidoListo]);
 
   // ── Edit helpers ────────────────────────────────────────────────────────────
 
@@ -167,6 +168,30 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
       onClose();
     }
   };
+  if (pedidoListo === true) {
+    return (
+      <motion.div
+        className="of-listo"
+        variants={cardVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="of-status-row">
+          <span>🎉 Tu pedido ya está listo para recoger</span>
+          <button type="button" className="of-dismiss" aria-label="Cerrar" onClick={onClose}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+        {notasAdmin && (
+          <p className="of-listo__notas">{notasAdmin}</p>
+        )}
+      </motion.div>
+    );
+  }
+
   if (rechazado === true) {
     return (
       <motion.div
@@ -176,7 +201,14 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
         animate="visible"
         exit="exit"
       >
-        <span>❌ Tu pedido fue rechazado</span>
+        <div className="of-status-row">
+          <span>❌ Tu pedido fue rechazado</span>
+          <button type="button" className="of-dismiss" aria-label="Cerrar" onClick={onClose}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
         {notasAdmin && (
           <p className="of-rechazado__notas">{notasAdmin}</p>
         )}
@@ -194,7 +226,14 @@ const ReceiptCard = ({ pedido, onClose, updatePedidoReceipt }) => {
         animate="visible"
         exit="exit"
       >
-        <span>✅ Tu pedido ya fue liberado</span>
+        <div className="of-status-row">
+          <span>✅ Tu pedido ya fue liberado</span>
+          <button type="button" className="of-dismiss" aria-label="Cerrar" onClick={onClose}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
         {notasAdmin && (
           <p className="of-liberado__notas">Administrador: {notasAdmin}</p>
         )}

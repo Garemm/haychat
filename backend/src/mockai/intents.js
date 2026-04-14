@@ -468,6 +468,7 @@ horarios: {
     { phrase: 'caracteristicas de', weight: 3 },
     { phrase: 'especificaciones de', weight: 3 },
     { phrase: 'descripcion de', weight: 3 },
+     { phrase: 'que descripcion tiene', weight: 3 },
     { phrase: 'informacion de', weight: 3 },
     { phrase: 'detalles de', weight: 3 },
 
