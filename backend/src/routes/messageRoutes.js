@@ -8,8 +8,8 @@
  * POST /api/messages fue eliminado — los mensajes se envían por socket
  * desde chatSocket.js, que llama directamente a MessageService.
  */
-const { Router } = require('express');
-const MessageService = require('../services/messageService');
+import { Router } from 'express';
+import MessageService from '../services/messageService.js';
 
 const router = Router();
 
@@ -23,4 +23,4 @@ router.get('/:roomId', (req, res, next) => {
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/services/aiDecisionEngine.js
  *
@@ -18,7 +16,7 @@
  * The pipeline consults this AFTER the deterministic layers fail.
  */
 
-const { normalize } = require('./normalize');
+import { normalize } from './normalize.js';
 
 /** Word count threshold for "long" messages. */
 const LONG_MESSAGE_WORDS = 12;
@@ -167,7 +165,7 @@ function hasRelevantData(ragContext) {
   return ragContext.type !== 'empty' && ragContext.data.length > 0;
 }
 
-module.exports = {
+export {
   shouldUseAI,
   hasRelevantData,
   LONG_MESSAGE_WORDS,

@@ -93,6 +93,6 @@ function getRAGOpenAIResponse(userMessage, ragContext, sessionContext = {}) {
   );
 }
 
-module.exports = { getMockOpenAIResponse, getRAGOpenAIResponse };
+export { getMockOpenAIResponse, getRAGOpenAIResponse };
 
 

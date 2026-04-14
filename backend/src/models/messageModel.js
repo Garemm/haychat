@@ -13,7 +13,7 @@
  * knows how data is stored. The rest of the app doesn't care.
  */
 
-const { v4: uuidv4 } = require('uuid');
+import { v4 as uuidv4 } from 'uuid';
 
 /** @type {Array<{id: string, roomId: string, sender: string, text: string, createdAt: string}>} */
 let messages = [];
@@ -51,4 +51,4 @@ const MessageModel = {
   },
 };
 
-module.exports = MessageModel;
+export default MessageModel;

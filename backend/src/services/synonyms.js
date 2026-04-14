@@ -1,6 +1,6 @@
 'use strict';
 
-const db = require('../config/database');
+import db from '../config/database.js';
 
 /**
  * synonyms.js
@@ -871,7 +871,7 @@ async function getSynonymsByBusinessId(term, businessId) {
   return getSynonymsAcrossCategories(term);
 }
 
-module.exports = {
+export {
   SYNONYM_MAP,
   getSynonym,
   getSynonymsAcrossCategories,

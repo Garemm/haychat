@@ -1,19 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/multiIntentParser.test.js
- *
- * Tests for multiIntentParser.js — the multi-intent splitter and response joiner.
- *
- * Coverage:
- *   - parseMultiIntent(): split detection, connector types, no-split cases
- *   - joinResponses(): bridge phrase selection and second-response formatting
- *   - hasSignal(): signal-word detection
- *   - Edge cases: very short messages, MAX_SPLITS cap, recursive splits
- *   - Business-type scenarios: restaurant, hardware store, pharmacy, clothing store
- */
-
-const { parseMultiIntent, joinResponses, hasSignal } = require('../../src/services/multiIntentParser');
+import { parseMultiIntent, joinResponses, hasSignal } from '../../src/services/multiIntentParser.js';
 
 // ─── hasSignal() ─────────────────────────────────────────────────────────────
 
@@ -210,6 +195,28 @@ describe('parseMultiIntent() — weak "y" connector (both sides need signal)', (
 
   test('"pan y agua" → NOT split (neither side has signal, both sides ≤ 3 words)', () => {
     const result = parseMultiIntent('pan y agua');
+    expect(result).toHaveLength(1);
+  });
+
+  // Right side starts with interrogative word ("que <noun>") — treated as new clause
+  test('"dime que hamburguesas vende y que refrescos" → 2 segments', () => {
+    const result = parseMultiIntent('dime que hamburguesas vende y que refrescos');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('hamburguesas');
+    expect(result[1].segment).toBe('que refrescos');
+    expect(result[1].connectorType).toBe('additive');
+  });
+
+  test('"que pizzas venden y que bebidas tienen" → 2 segments', () => {
+    const result = parseMultiIntent('que pizzas venden y que bebidas tienen');
+    expect(result).toHaveLength(2);
+    expect(result[0].segment).toContain('pizzas');
+    expect(result[1].segment).toContain('bebidas');
+  });
+
+  // Lone "que" without following token must NOT be treated as a clause
+  test('"pan que y agua" → NOT split (right of "y" is just "agua", no signal)', () => {
+    const result = parseMultiIntent('pan que y agua');
     expect(result).toHaveLength(1);
   });
 });

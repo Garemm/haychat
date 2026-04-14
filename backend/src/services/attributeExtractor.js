@@ -20,7 +20,7 @@
  *   - Works on already-normalized text (lowercase, no accents)
  */
 
-const { normalize } = require('./normalize');
+import { normalize } from './normalize.js';
 
 // ─── Measure detection ────────────────────────────────────────────────────────
 
@@ -375,7 +375,7 @@ function extractCategoryAttributeQuery(message) {
   return { categoryWord, attribute };
 }
 
-module.exports = {
+export {
   extractAttribute,
   extractCompoundQuery,
   extractCategoryAttributeQuery,

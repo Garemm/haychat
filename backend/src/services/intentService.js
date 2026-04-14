@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/services/intentService.js
  *
@@ -12,7 +10,7 @@
  * ADD NEW INTENTS: just add them to intents.js — no changes needed here.
  */
 
-const intents = require('../mockai/intents');
+import intents from '../mockai/intents.js';
 
 /**
  * Strips accents and lowercases a string so comparisons are accent-insensitive.
@@ -48,4 +46,4 @@ function detectIntent(message) {
   return null;
 }
 
-module.exports = { detectIntent };
+export { detectIntent };

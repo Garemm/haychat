@@ -4,8 +4,8 @@
  * REST endpoints for business (tenant) data.
  * Used by the frontend BusinessSelector to list available tenants.
  */
-const { Router } = require('express');
-const BusinessModel = require('../models/businessModel');
+import { Router } from 'express';
+import BusinessModel from '../models/businessModel.js';
 
 const router = Router();
 
@@ -30,4 +30,4 @@ router.get('/by-uuid/:chatUuid', async (req, res, next) => {
   }
 });
 
-module.exports = router;
+export default router;

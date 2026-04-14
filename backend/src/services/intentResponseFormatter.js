@@ -289,7 +289,7 @@ function formatServiceWithContact(service, contactInfo) {
   return `${servicePart} ¿Hay algo más en lo que te pueda ayudar?`;
 }
 
-module.exports = {
+export {
   formatIntentResponse,
   formatHorarioDay,
   formatList,

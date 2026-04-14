@@ -91,4 +91,4 @@ function wordVariants(word) {
   return singular !== word ? [word, singular] : [word];
 }
 
-module.exports = { normalize, toSingular, wordVariants };
+export { normalize, toSingular, wordVariants };

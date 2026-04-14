@@ -19,7 +19,7 @@
  *     service boundary (not in the controller).
  */
 
-const MessageModel = require('../models/messageModel');
+import MessageModel from '../models/messageModel.js';
 
 const MessageService = {
   /**
@@ -44,4 +44,4 @@ const MessageService = {
   },
 };
 
-module.exports = MessageService;
+export default MessageService;

@@ -913,4 +913,4 @@ ubicacion: {
 },
 };
 
-module.exports = intents;
+export default intents;

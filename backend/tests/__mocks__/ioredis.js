@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * tests/__mocks__/ioredis.js
  *
@@ -64,4 +62,4 @@ class RedisMock {
   }
 }
 
-module.exports = RedisMock;
+export default RedisMock;

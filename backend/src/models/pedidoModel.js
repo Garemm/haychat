@@ -12,7 +12,7 @@
  *   updatePedido(id, fields)            — Admin updates status / notes.
  */
 
-const db = require('../config/database');
+import db from '../config/database.js';
 
 const PedidoModel = {
   /**
@@ -109,4 +109,4 @@ const PedidoModel = {
   },
 };
 
-module.exports = PedidoModel;
+export default PedidoModel;

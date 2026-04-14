@@ -6,13 +6,13 @@
  * the HTTP server or Socket.io connection.
  */
 
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { CLIENT_URL } = require('./config/env');
-const routes = require('./routes');
-const errorHandler = require('./middlewares/errorHandler');
-const requestLogger = require('./middlewares/requestLogger');
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import { CLIENT_URL } from './config/env.js';
+import routes from './routes/index.js';
+import errorHandler from './middlewares/errorHandler.js';
+import requestLogger from './middlewares/requestLogger.js';
 
 const app = express();
 
@@ -33,4 +33,4 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 // ── Centralized Error Handler (must be last) ─────────────────────────────────
 app.use(errorHandler);
 
-module.exports = app;
+export default app;

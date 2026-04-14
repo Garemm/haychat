@@ -1,27 +1,16 @@
-'use strict';
-
-/**
- * tests/unit/attributeSearch.test.js
- *
- * Tests for the attribute-based semantic search NLP layer.
- *
- * Covers:
- *   - attributeExtractor: pattern detection and type classification
- *   - attributeSearchService: DB query building and response formatting
- *   - entityDetector: attribute entity type routing
- *   - messagePipeline: full pipeline attribute routing + no OpenAI used
- */
-
 // ─── Mock DB ─────────────────────────────────────────────────────────────────
 jest.mock('../../src/config/database', () => ({ query: jest.fn() }));
 // ─── Mock Redis ───────────────────────────────────────────────────────────────
 jest.mock('../../src/config/redis', () => ({
-  get: jest.fn().mockResolvedValue(null),
-  setex: jest.fn().mockResolvedValue('OK'),
+  default: {
+    get: jest.fn().mockResolvedValue(null),
+    setex: jest.fn().mockResolvedValue('OK'),
+  },
+  isRedisUp: jest.fn().mockReturnValue(false),
 }));
 // ─── Mock OpenAI / AI modules — must NOT be called during attribute path ─────
-const mockGetMockOpenAI = jest.fn();
-const mockGetRAGOpenAI  = jest.fn();
+var mockGetMockOpenAI = jest.fn();
+var mockGetRAGOpenAI  = jest.fn();
 jest.mock('../../src/temp/mockOpenAI', () => ({
   getMockOpenAIResponse: mockGetMockOpenAI,
   getRAGOpenAIResponse:  mockGetRAGOpenAI,
@@ -44,18 +33,16 @@ jest.mock('../../src/mockai/keywordResponses', () => ({
   getKeywordResponse: jest.fn().mockReturnValue(null),
 }));
 
-const db = require('../../src/config/database');
-
-const {
+import db from '../../src/config/database.js';
+import {
   extractAttribute,
   extractCompoundQuery,
   extractCategoryAttributeQuery,
   isAttributeQuery,
   classifyAttributeType,
   isMeasure,
-} = require('../../src/services/attributeExtractor');
-
-const {
+} from '../../src/services/attributeExtractor.js';
+import {
   searchByAttribute,
   searchByAttributes,
   searchByCompoundQuery,
@@ -64,11 +51,9 @@ const {
   formatCompoundQueryResponse,
   formatCategoryAttributeResponse,
   buildAttributeConditions,
-} = require('../../src/services/attributeSearchService');
-
-const { detectEntities } = require('../../src/services/entityDetector');
-
-const { processMessage } = require('../../src/services/messagePipeline');
+} from '../../src/services/attributeSearchService.js';
+import { detectEntities } from '../../src/services/entityDetector.js';
+import { processMessage } from '../../src/services/messagePipeline.js';
 
 beforeEach(() => {
   jest.clearAllMocks();

@@ -22,8 +22,9 @@
  * intent key is automatically scanned by detectIntent().
  */
 
-const intents = require('../mockai/intents');
-const { normalize } = require('./normalize');
+import intents from '../mockai/intents.js';
+import { normalize } from './normalize.js';
+import { getExpandedIntents } from './redisService.js';
 
 /** Minimum score for an intent to be considered detected. */
 const MIN_CONFIDENCE = 1;
@@ -178,7 +179,6 @@ function isStandaloneIntent(intentKey, intentsConfig = undefined) {
  */
 async function initIntents() {
   try {
-    const { getExpandedIntents } = require('./redisService');
     const expanded = await getExpandedIntents();
     if (expanded && typeof expanded === 'object') {
       _activeIntents = expanded;
@@ -219,4 +219,4 @@ function detectMultipleIntents(message) {
     .map(([intent, score]) => ({ intent, score }));
 }
 
-module.exports = { detectIntent, scoreIntents, isStandaloneIntent, initIntents, detectMultipleIntents, MIN_CONFIDENCE };
+export { detectIntent, scoreIntents, isStandaloneIntent, initIntents, detectMultipleIntents, MIN_CONFIDENCE };

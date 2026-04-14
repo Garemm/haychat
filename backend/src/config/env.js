@@ -6,34 +6,31 @@
  * from controllers/services. This keeps things explicit and easy to audit.
  */
 
-const env = {
-  NODE_ENV: process.env.NODE_ENV || 'development',
-  PORT: parseInt(process.env.PORT, 10) || 3000,
-  // Comma-separated list of allowed origins, e.g. "http://localhost:5173,http://192.168.1.3:5173"
-  CLIENT_URL: (process.env.CLIENT_URL || 'http://localhost:5173,http://192.168.1.3:5173')
-    .split(',')
-    .map((u) => u.trim())
-    .filter(Boolean),
+export const NODE_ENV = process.env.NODE_ENV || 'development';
+export const PORT = parseInt(process.env.PORT, 10) || 3000;
+// Comma-separated list of allowed origins, e.g. "http://localhost:5173,http://192.168.1.3:5173"
+export const CLIENT_URL = (process.env.CLIENT_URL || 'http://localhost:5173,http://192.168.1.3:5173')
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean);
 
-  // ── PostgreSQL ────────────────────────────────────────────────────────────
-  DB_HOST: process.env.DB_HOST,
-  DB_PORT: parseInt(process.env.DB_PORT, 10) || 5432,
-  DB_NAME: process.env.DB_NAME,
-  DB_USER: process.env.DB_USER,
-  DB_PASSWORD: process.env.DB_PASSWORD,
+// ── PostgreSQL ────────────────────────────────────────────────────────────
+export const DB_HOST     = process.env.DB_HOST;
+export const DB_PORT     = parseInt(process.env.DB_PORT, 10) || 5432;
+export const DB_NAME     = process.env.DB_NAME;
+export const DB_USER     = process.env.DB_USER;
+export const DB_PASSWORD = process.env.DB_PASSWORD;
 
-  // ── Redis (contexto conversacional / cache de sesiones) ──────────────────
-  REDIS_HOST: process.env.REDIS_HOST || 'localhost',
-  REDIS_PORT: parseInt(process.env.REDIS_PORT, 10) || 6379,
+// ── Redis (contexto conversacional / cache de sesiones) ──────────────────
+export const REDIS_HOST  = process.env.REDIS_HOST || 'localhost';
+export const REDIS_PORT  = parseInt(process.env.REDIS_PORT, 10) || 6379;
 
-  // ── Ollama (local LLM fallback) ──────────────────────────────────────────
-  OLLAMA_URL:        process.env.OLLAMA_URL        || 'http://localhost:11434',
-  OLLAMA_MODEL:      process.env.OLLAMA_MODEL      || 'llama3:latest',
-  // 120s: first call loads the model into VRAM/RAM (cold start can take 30-60s)
-  OLLAMA_TIMEOUT_MS: parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000,
+// ── Ollama (local LLM fallback) ──────────────────────────────────────────
+export const OLLAMA_URL        = process.env.OLLAMA_URL        || 'http://localhost:11434';
+export const OLLAMA_MODEL      = process.env.OLLAMA_MODEL      || 'llama3:latest';
+// 120s: first call loads the model into VRAM/RAM (cold start can take 30-60s)
+export const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000;
 
-  // ── OpenAI (uncomment when integrating) ─────────────────────────────────
-  // OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-};
+// ── OpenAI (uncomment when integrating) ─────────────────────────────────
+// export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-module.exports = env;

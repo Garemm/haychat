@@ -1,29 +1,14 @@
-'use strict';
-
-/**
- * tests/unit/nlpEntityExtractor.test.js
- *
- * Unit tests for:
- *   - nlpEntityExtractor.normalize()
- *   - nlpEntityExtractor.extractProductEntity()
- *   - nlpEntityExtractor.extractAndRespond()   ← DB is mocked
- *
- * The `database` module is mocked so these tests never touch PostgreSQL.
- * extractAndRespond() is tested via a mock DB that returns controlled rows,
- * verifying the full normalize → extract → query → format pipeline.
- */
-
 // ─── Mock the pg Pool before requiring the module under test ─────────────────
 jest.mock('../../src/config/database', () => ({
   query: jest.fn(),
 }));
 
-const db = require('../../src/config/database');
-const {
+import db from '../../src/config/database.js';
+import {
   normalize,
   extractProductEntity,
   extractAndRespond,
-} = require('../../src/services/nlpEntityExtractor');
+} from '../../src/services/nlpEntityExtractor.js';
 
 // ─── normalize() ─────────────────────────────────────────────────────────────
 

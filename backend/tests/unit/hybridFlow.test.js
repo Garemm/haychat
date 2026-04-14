@@ -1,46 +1,35 @@
-'use strict';
+// ─── Mock ioredis antes de cualquier import ─────────────────────────────────
+jest.mock('ioredis', () => {
+  const _store     = new Map();
+  const _listStore = new Map();
+  const inst = {
+    get:    jest.fn(async (key)            => _store.get(key) ?? null),
+    setex:  jest.fn(async (key, _ttl, val) => { _store.set(key, val); return 'OK'; }),
+    rpush:  jest.fn(async (key, val)       => { const l = _listStore.get(key) || []; l.push(val); _listStore.set(key, l); return l.length; }),
+    lrange: jest.fn(async (key, s, e)      => { const l = _listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
+    expire: jest.fn(async ()               => 1),
+    on:     jest.fn(),
+  };
+  global.__hfStore     = _store;
+  global.__hfListStore = _listStore;
+  global.__hfInstance  = inst;
+  return jest.fn().mockImplementation(() => inst);
+});
 
-/**
- * tests/unit/hybridFlow.test.js
- *
- * Tests del flujo híbrido: backend-first + AI decision engine + RAG filter.
- *
- * COBERTURA:
- *   - shouldUseAI(): cuándo rutear a AI vs backend
- *   - filterRelevantData(): filtrado RAG por tipo de consulta
- *   - classifyAIRequest(): clasificación de consultas AI
- *   - extractComparisonEntities(): extracción de entidades para comparación
- *   - handleAIFallback(): flujo completo del hybrid handler
- *   - processMessage() → validar que backend responde cuando puede
- *   - processMessage() → validar que AI se usa solo cuando es necesario
- *   - Validar que NO se usa AI innecesariamente
- */
-
-// ─── Mock ioredis antes de cualquier require ─────────────────────────────────
-const store     = new Map();
-const listStore = new Map();
-
-const mockRedisInstance = {
-  get:    jest.fn(async (key)            => store.get(key) ?? null),
-  setex:  jest.fn(async (key, _ttl, val) => { store.set(key, val); return 'OK'; }),
-  rpush:  jest.fn(async (key, val)       => { const l = listStore.get(key) || []; l.push(val); listStore.set(key, l); return l.length; }),
-  lrange: jest.fn(async (key, s, e)      => { const l = listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
-  expire: jest.fn(async ()               => 1),
-  on:     jest.fn(),
-};
-
-jest.mock('ioredis', () => jest.fn().mockImplementation(() => mockRedisInstance));
+var store             = global.__hfStore;
+var listStore         = global.__hfListStore;
+var mockRedisInstance = global.__hfInstance;
 
 // ─── Mock database ───────────────────────────────────────────────────────────
 jest.mock('../../src/config/database', () => ({ query: jest.fn() }));
 
-const db = require('../../src/config/database');
+import db from '../../src/config/database.js';
 
 // ─── Importar módulos bajo test ──────────────────────────────────────────────
-const { shouldUseAI, hasRelevantData, LONG_MESSAGE_WORDS } = require('../../src/services/aiDecisionEngine');
-const { filterRelevantData, classifyAIRequest, extractComparisonEntities, MAX_ITEMS } = require('../../src/services/ragFilterService');
-const { processMessage, handleAIFallback } = require('../../src/services/messagePipeline');
-const { getContext, updateContext } = require('../../src/services/sessionContextService');
+import { shouldUseAI, hasRelevantData, LONG_MESSAGE_WORDS } from '../../src/services/aiDecisionEngine.js';
+import { filterRelevantData, classifyAIRequest, extractComparisonEntities, MAX_ITEMS } from '../../src/services/ragFilterService.js';
+import { processMessage, handleAIFallback } from '../../src/services/messagePipeline.js';
+import { getContext, updateContext } from '../../src/services/sessionContextService.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const sid = () => `hybrid-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

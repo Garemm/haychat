@@ -2,6 +2,7 @@
   "name": "llm-chat-backend",
   "version": "1.0.0",
   "description": "Real-time messaging backend — Express + Socket.io",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,6 +13,9 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
     "testMatch": [
       "**/tests/**/*.test.js"
     ],
@@ -56,7 +60,10 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
     "@jest/globals": "^30.3.0",
+    "babel-jest": "^30.3.0",
     "jest": "^30.3.0",
     "nodemon": "^3.1.0",
     "socket.io-client": "^4.8.3"

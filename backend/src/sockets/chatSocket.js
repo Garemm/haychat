@@ -20,16 +20,17 @@
  *   that messages persist across page reloads and reconnects.
  */
 
-const { Server } = require('socket.io');
-const MessageService    = require('../services/messageService');
-const { processMessage } = require('../services/messagePipeline');
-const { CLIENT_URL }    = require('../config/env');
-const { getContext, updateContext, SESSION_TTL_SECONDS } = require('../services/sessionContextService');
-const { getHistory, saveMessage: redisSaveMessage } = require('../services/redisService');
-const { getCategories } = require('../services/businessInfoService');
-const { formatList }    = require('../services/intentResponseFormatter');
-const BusinessModel     = require('../models/businessModel');
-const PedidoModel       = require('../models/pedidoModel');
+import { Server } from 'socket.io';
+import MessageService from '../services/messageService.js';
+import { processMessage } from '../services/messagePipeline.js';
+import { CLIENT_URL } from '../config/env.js';
+import { getContext, updateContext, SESSION_TTL_SECONDS } from '../services/sessionContextService.js';
+import { getHistory, saveMessage as redisSaveMessage } from '../services/redisService.js';
+import { getCategories } from '../services/businessInfoService.js';
+import { formatList } from '../services/intentResponseFormatter.js';
+import BusinessModel from '../models/businessModel.js';
+import PedidoModel from '../models/pedidoModel.js';
+import { randomUUID } from 'crypto';
 
 /** Milliseconds of inactivity before sending the re-engagement message.
  *  Matches SESSION_TTL_SECONDS so the message fires exactly when Redis context expires. */
@@ -73,7 +74,7 @@ function resetIdleTimer(sessionId, roomId, businessId) {
 
       const botTimestamp = new Date().toISOString();
       const botMsg = {
-        id:        require('crypto').randomUUID(),
+        id:        randomUUID(),
         roomId,
         sender:    'Bot',
         text:      replyText,
@@ -156,7 +157,7 @@ const initSocket = (httpServer) => {
             `• Cómo contactarnos o comprar\n\n` +
             `¡Es un placer atenderte! 😊`;
           const welcomeMsg = {
-            id:        require('crypto').randomUUID(),
+            id:        randomUUID(),
             sender:    'Bot',
             text:      welcomeText,
             timestamp: new Date().toISOString(),
@@ -198,7 +199,7 @@ const initSocket = (httpServer) => {
 
         // 1. Build and emit user message (shape matches history entries)
         const message = {
-          id:        require('crypto').randomUUID(),
+          id:        randomUUID(),
           roomId,
           sender,
           text,
@@ -229,7 +230,7 @@ const initSocket = (httpServer) => {
 
         // 4. Build and emit bot response
         const botMsg = {
-          id:        require('crypto').randomUUID(),
+          id:        randomUUID(),
           roomId,
           sender:    'Bot',
           text:      replyText,
@@ -407,5 +408,5 @@ const getIO = () => {
   return io;
 };
 
-module.exports = { initSocket, getIO };
+export { initSocket, getIO };
 

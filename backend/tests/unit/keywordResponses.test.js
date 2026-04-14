@@ -1,19 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/keywordResponses.test.js
- *
- * Unit tests for src/mockai/keywordResponses.js
- *
- * Tests cover:
- *   - Known keywords that should match
- *   - Case-insensitive matching
- *   - Keyword embedded inside a longer sentence
- *   - Messages that produce no match
- *   - Null / undefined / empty input guards
- */
-
-const { getKeywordResponse } = require('../../src/mockai/keywordResponses');
+import { getKeywordResponse } from '../../src/mockai/keywordResponses.js';
 
 // ─── Positive matches ─────────────────────────────────────────────────────────
 

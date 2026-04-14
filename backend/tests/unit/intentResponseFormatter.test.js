@@ -1,19 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/intentResponseFormatter.test.js
- *
- * Unit tests for src/services/intentResponseFormatter.js
- *
- * Tests verify:
- *   - Natural, conversational responses (no emojis, no bullet points)
- *   - Voice-friendly output (no markdown symbols like *, •, —)
- *   - Stock NOT included unless explicitly requested
- *   - All intent formatters produce readable Spanish sentences
- *   - Edge cases (empty data, null, midnight/noon times)
- */
-
-const { formatIntentResponse } = require('../../src/services/intentResponseFormatter');
+import { formatIntentResponse } from '../../src/services/intentResponseFormatter.js';
 
 // ─── Helper fixtures ──────────────────────────────────────────────────────────
 

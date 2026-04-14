@@ -1,15 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/messageModel.test.js
- *
- * Unit tests for src/models/messageModel.js
- *
- * MessageModel uses an in-memory array, so no DB mocking is needed.
- * The store is cleared in beforeEach to guarantee test isolation.
- */
-
-const MessageModel = require('../../src/models/messageModel');
+import MessageModel from '../../src/models/messageModel.js';
 
 beforeEach(() => {
   MessageModel.clear();

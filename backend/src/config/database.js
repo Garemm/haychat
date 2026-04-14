@@ -22,17 +22,17 @@
  */
 
 // ── Option A: Raw pg Pool ─────────────────────────────────────────────────────
-const { Pool } = require('pg');
-const env = require('./env');
+import { Pool } from 'pg';
+import { DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } from './env.js';
 
 const db = new Pool({
-  host:     env.DB_HOST,
-  port:     env.DB_PORT,
-  database: env.DB_NAME,
-  user:     env.DB_USER,
-  password: String(env.DB_PASSWORD ?? ''),
+  host:     DB_HOST,
+  port:     DB_PORT,
+  database: DB_NAME,
+  user:     DB_USER,
+  password: String(DB_PASSWORD ?? ''),
 });
-module.exports = db;
+export default db;
 
 // ── Option B: Sequelize ───────────────────────────────────────────────────────
 // const { Sequelize } = require('sequelize');
@@ -42,4 +42,4 @@ module.exports = db;
 //   process.env.DB_PASSWORD,
 //   { host: process.env.DB_HOST, dialect: 'postgres', logging: false }
 // );
-// module.exports = sequelize;
+// export default sequelize;

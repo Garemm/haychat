@@ -16,9 +16,10 @@
  *   - Intent-aware: "recomiéndame algo" → products; "compara X y Y" → specific products
  */
 
-const BusinessModel = require('../models/businessModel');
-const { queryProducts, queryCategories } = require('./entityDetector');
-const { normalize } = require('./normalize');
+import BusinessModel from '../models/businessModel.js';
+import { queryProducts, queryCategories } from './entityDetector.js';
+import { normalize } from './normalize.js';
+import { searchByCompoundQuery } from './attributeSearchService.js';
 
 /** Maximum items to include in the RAG context for any single query. */
 const MAX_ITEMS = 15;
@@ -113,7 +114,6 @@ async function filterRelevantData(normalizedText, businessId, intentResult, enti
         const CON_IN_MSG = /\bcon\s+(?<attr>[\wñ][\wñ\s]{1,30}?)(?:\s*\?)?$/.exec(normalizedText);
         const attrHint = CON_IN_MSG?.groups?.attr?.trim();
         if (catHint && attrHint) {
-          const { searchByCompoundQuery } = require('./attributeSearchService');
           // Use base noun of catHint (first non-preposition word) so "hamburguesa doble"
           // broadens to "hamburguesa" when filtering by attribute.
           const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
@@ -303,7 +303,7 @@ async function _fetchByIntent(intentName, businessId) {
   return { type: 'empty', data: [], summary: `Sin handler para intent "${intentName}"`, total: 0 };
 }
 
-module.exports = {
+export {
   filterRelevantData,
   classifyAIRequest,
   extractComparisonEntities,

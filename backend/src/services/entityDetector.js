@@ -24,10 +24,10 @@
  *   - "algo con queso?"     → intent=productos, entity=attribute:"queso"
  */
 
-const nlp = require('compromise');
-const db  = require('../config/database');
-const { normalize, toSingular, wordVariants } = require('./normalize');
-const { extractAttribute, extractCompoundQuery, extractCategoryAttributeQuery, isMaterial } = require('./attributeExtractor');
+import nlp from 'compromise';
+import db from '../config/database.js';
+import { normalize, toSingular, wordVariants } from './normalize.js';
+import { extractAttribute, extractCompoundQuery, extractCategoryAttributeQuery, isMaterial } from './attributeExtractor.js';
 
 // ─── Stopwords ────────────────────────────────────────────────────────────────
 
@@ -91,6 +91,10 @@ const ENTITY_BLOCKLIST = new Set([
   'muestrame', 'dame', 'pasame', 'mandame', 'enviame',
   // Freestanding prepositions / affirmations that NLP misidentifies as nouns
   'sobre', 'acerca', 'si',
+  // List connector — "y" inside an extracted entity means the pattern captured
+  // multiple items (e.g. "hamburguesa doble y soda"); that is never a valid
+  // single product name so we block the whole candidate.
+  'y',
 ]);
 
 function isBlocklisted(entity) {
@@ -136,8 +140,10 @@ const PRODUCT_QUERY_PATTERNS = [
   /tienen\s+disponible\s+(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /hay\s+disponibilidad\s+de\s+(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /cu[ae]nto\s+(?:cuesta|vale|sale|cobran\s+por)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
-  // "que precio tiene la hamburguesa" / "cual es el precio de la pizza"
+  // "que precio tiene la hamburguesa" / "cual es el precio de la pizza" / "cual es el precio del arroz"
+  // The second form handles "del" (contracted de+el) directly after "precio".
   /(?:que\s+|cual\s+es\s+(?:el\s+)?)?precio\s+(?:tiene[n]?|cuesta|cobran|vale|sale)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  /(?:cual\s+es\s+(?:el\s+)?)?precio\s+(?:del?\s+(?:el\s+|la\s+|los\s+|las\s+)?|de\s+(?:la\s+|los\s+|las\s+|un\s+|una\s+))(?<entity>[\wñ\s]+?)(?:\?|$)/,
   // "precio hamburguesa" / "precio agua de horchata" (bare price query, starts with "precio")
   /^precio\s+(?:de\s+)?(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /precio\s+de\s+(?:el\s+|la\s+|los\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
@@ -163,11 +169,23 @@ const PRODUCT_QUERY_PATTERNS = [
   // MUST appear before the generic "que X tienen" pattern below.
   /^que\s+tipos?\s+de\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,3})\s+(?:tiene[sn]?|tienen|hay|vende[sn]?|venden|ofrece[n]?|maneja[n]?)\s*\??$/,
   /que\s+tipos?\s+de\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,3})\s+(?:tiene[sn]?|tienen|hay|vende[sn]?|venden|ofrece[n]?|maneja[n]?)/,
-  // "que [entity] tienen/tienes/hay?" — entity BETWEEN "que" and trailing verb.
+  // Fronted-PP interrogative: "de X que tienes/tienen/hay?" — PP precedes the verb.
+  // e.g. "de postres que tienes" → entity=postres
+  //      "de hamburguesas que tienen" → entity=hamburguesas
+  // Must run BEFORE the generic tiene[sn]? pattern.
+  /^de\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,3})\s+que\s+(?:tienes?|tienen|hay|vende[sn]?|ofrecen?)\s*\??$/,
+  // "que [entity] tienen/tienes/hay/vende/venden/ofrece/maneja?" — entity BETWEEN "que" and trailing verb.
   // Must run BEFORE the generic tiene[sn]? pattern which would otherwise grab
   // whatever follows "tienen" (e.g. "disponibles") as the entity.
   // Distinct from description patterns where verb follows IMMEDIATELY after "que".
-  /^que\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,4})\s+(?:tiene[sn]?|tienen|hay)\s*(?:[\wñ]+\s*)?\??$/,
+  /^que\s+(?<entity>[\wñ]+(?:\s+[\wñ]+){0,4})\s+(?:tiene[sn]?|tienen|hay|vende[sn]?|venden|ofrece[n]?|maneja[n]?)\s*(?:[\wñ]+\s*)?\??$/,
+  // Bare "que <noun>" — verbless clause from a multi-intent split where the user
+  // omitted the verb (e.g. right side of "vende y tambien que refrescos" → "que refrescos").
+  // Matches ONLY when the ENTIRE segment is "que <1-4 word noun phrase>" with no verb.
+  // Negative lookahead prevents matching when the noun IS a known verb/query word
+  // (e.g. "que venden" must not extract "venden" as an entity here).
+  // Must appear AFTER all "que X verb" patterns; this is the final fallback.
+  /^que\s+(?!(?:vende[nsn]?|tienes?|tienen|hay|ofrece[n]?|maneja[n]?|contiene[n]?|incluye[n]?|es\b|son\b|tipo[s]?\b|precio[s]?\b|horario[s]?\b|servicio[s]?\b|promo(?:cion(?:es)?)?\b)(?:\s|$))(?<entity>[\wñ]+)\s*\??$/,
   /tiene[sn]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /hay\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /existe[n]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
@@ -854,7 +872,7 @@ function formatPartialMatchResponse(originalEntity, products) {
   return `Encontré productos relacionados con lo que buscas: ${_enumList(names)}. ¿Alguno te interesa?`;
 }
 
-module.exports = {
+export {
   detectEntities,
   extractEntityCandidate,
   queryProducts,

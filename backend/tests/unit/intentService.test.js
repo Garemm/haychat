@@ -1,19 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/intentService.test.js
- *
- * Unit tests for:
- *   - intentDetector.detectIntent()      — score-based intent detection
- *   - intentDetector.scoreIntents()      — individual intent scoring
- *   - intentDetector.isStandaloneIntent() — standalone flag checking
- *
- * These tests are PURE (no DB, no sockets).
- * They verify that weighted keyword scoring and text normalization work
- * correctly for Spanish user input with and without accents.
- */
-
-const { detectIntent, scoreIntents, isStandaloneIntent, MIN_CONFIDENCE } = require('../../src/services/intentDetector');
+import { detectIntent, scoreIntents, isStandaloneIntent, MIN_CONFIDENCE } from '../../src/services/intentDetector.js';
 
 // ─── detectIntent ─────────────────────────────────────────────────────────────
 

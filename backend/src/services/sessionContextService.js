@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/services/sessionContextService.js
  *
@@ -16,17 +14,17 @@
  *   hist:<businessId>:<sessionId>  TTL: 86400 s (message history)
  */
 
-const {
+import {
   getContext,
   updateContext,
   EMPTY_CONTEXT,
   CTX_TTL_SECONDS,
   pushTurnMemory,
   addRejectedEntity,
-} = require('./redisService');
+} from './redisService.js';
 
 /** Alias kept for backward compatibility with chatSocket.js */
 const SESSION_TTL_SECONDS = CTX_TTL_SECONDS;
 
-module.exports = { getContext, updateContext, EMPTY_CONTEXT, SESSION_TTL_SECONDS, pushTurnMemory, addRejectedEntity };
+export { getContext, updateContext, EMPTY_CONTEXT, SESSION_TTL_SECONDS, pushTurnMemory, addRejectedEntity };
 

@@ -1,52 +1,41 @@
-'use strict';
+// ─── Mock ioredis antes de cualquier import ──────────────────────────────────
+jest.mock('ioredis', () => {
+  const _store     = new Map();
+  const _listStore = new Map();
+  const inst = {
+    get:    jest.fn(async (key)            => _store.get(key) ?? null),
+    setex:  jest.fn(async (key, _ttl, val) => { _store.set(key, val); return 'OK'; }),
+    rpush:  jest.fn(async (key, val)       => { const l = _listStore.get(key) || []; l.push(val); _listStore.set(key, l); return l.length; }),
+    lrange: jest.fn(async (key, s, e)      => { const l = _listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
+    expire: jest.fn(async ()               => 1),
+    on:     jest.fn(),
+  };
+  global.__cfStore     = _store;
+  global.__cfListStore = _listStore;
+  global.__cfInstance  = inst;
+  return jest.fn().mockImplementation(() => inst);
+});
 
-/**
- * tests/unit/conversationalFlow.test.js
- *
- * Tests del flujo conversacional multi-turno con el nuevo pipeline NLP.
- *
- * COBERTURA:
- *   - decide(): reglas de decisión del pipeline
- *   - buildContextUpdate(): objeto de persistencia correcto por turno
- *   - extractFollowUpEntity(): refinamiento de entidad en mensajes "¿Y X?"
- *   - isAmbiguous(): detección de mensajes ambiguos
- *   - Full pipeline: processMessage() con mocks de DB y Redis
- *
- * MOCKS:
- *   - ioredis: Map en memoria (simula TTL con store.delete)
- *   - database: jest.fn() (entityDetector hace queries mockeadas)
- */
-
-// ─── Mock ioredis antes de cualquier require ─────────────────────────────────
-const store     = new Map();
-const listStore = new Map();
-
-const mockRedisInstance = {
-  get:    jest.fn(async (key)            => store.get(key) ?? null),
-  setex:  jest.fn(async (key, _ttl, val) => { store.set(key, val); return 'OK'; }),
-  rpush:  jest.fn(async (key, val)       => { const l = listStore.get(key) || []; l.push(val); listStore.set(key, l); return l.length; }),
-  lrange: jest.fn(async (key, s, e)      => { const l = listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
-  expire: jest.fn(async ()               => 1),
-  on:     jest.fn(),
-};
-
-jest.mock('ioredis', () => jest.fn().mockImplementation(() => mockRedisInstance));
+var store             = global.__cfStore;
+var listStore         = global.__cfListStore;
+var mockRedisInstance = global.__cfInstance;
 
 // ─── Mock database (requerido por entityDetector) ────────────────────────────
 jest.mock('../../src/config/database', () => ({ query: jest.fn() }));
 
-const db = require('../../src/config/database');
+import db from '../../src/config/database.js';
 
 // ─── Importar módulos bajo test ───────────────────────────────────────────────
-const { detectIntent } = require('../../src/services/intentDetector');
-const {
+import { detectIntent } from '../../src/services/intentDetector.js';
+import {
   decide,
   buildContextUpdate,
   extractFollowUpEntity,
   isAmbiguous,
   processMessage,
-} = require('../../src/services/messagePipeline');
-const { getContext, updateContext, EMPTY_CONTEXT } = require('../../src/services/sessionContextService');
+} from '../../src/services/messagePipeline.js';
+import { getContext, updateContext, EMPTY_CONTEXT } from '../../src/services/sessionContextService.js';
+import { extractEntityCandidate } from '../../src/services/entityDetector.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1165,22 +1154,18 @@ describe('"tiene X" — detección verbo+entidad sin tienes/tienen', () => {
   // ── extractEntityCandidate ────────────────────────────────────────────────
 
   test('"tiene hamburguesa" → extrae "hamburguesa"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('tiene hamburguesa')).toBe('hamburguesa');
   });
 
   test('"tiene hamburguesa bbq" → extrae "hamburguesa bbq"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('tiene hamburguesa bbq')).toBe('hamburguesa bbq');
   });
 
   test('"tiene la hamburguesa mexicana" → extrae "hamburguesa mexicana" (elimina artículo)', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('tiene la hamburguesa mexicana')).toBe('hamburguesa mexicana');
   });
 
   test('"tiene hamburguesas" → extrae "hamburguesas"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('tiene hamburguesas')).toBe('hamburguesas');
   });
 
@@ -1425,22 +1410,18 @@ describe('Disponibilidad de productos', () => {
   // ── extractEntityCandidate para frases de disponibilidad ──────────────────
 
   test('"esta disponible la pizza" → extrae "pizza"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('esta disponible la pizza')).toBe('pizza');
   });
 
   test('"hay stock de cuadernos" → extrae "cuadernos"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('hay stock de cuadernos')).toBe('cuadernos');
   });
 
   test('"tienen disponibilidad de la hamburguesa" → extrae "hamburguesa"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('tienen disponibilidad de la hamburguesa')).toBe('hamburguesa');
   });
 
   test('"hay stock de laptop gamer" → extrae "laptop gamer"', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('hay stock de laptop gamer')).toBe('laptop gamer');
   });
 
@@ -1756,6 +1737,22 @@ describe('extractFollowUpEntity() — preposition-enrichment ("y de X")', () => 
   test('"y de jamaica" + lastEntity sin preposición → sin enriquecimiento → "de jamaica"', () => {
     // lastEntity "pizza" has no "de/con/al", so enrichment base extraction fails → returns raw candidate
     expect(extractFollowUpEntity('y de jamaica', { value: 'pizza', type: 'product' })).toBe('de jamaica');
+  });
+
+  // "del X" — contracted de+el — must extract standalone product, NOT prepend context entity
+  test('"el del agua de jamaica" + lastEntity="arroz con leche" → "agua de jamaica" (no corruption)', () => {
+    const result = extractFollowUpEntity('el del agua de jamaica', { value: 'arroz con leche', type: 'product' });
+    expect(result).toBe('agua de jamaica');
+  });
+
+  test('"del agua de jamaica" (bare) + lastEntity="arroz con leche" → "agua de jamaica"', () => {
+    const result = extractFollowUpEntity('del agua de jamaica', { value: 'arroz con leche', type: 'product' });
+    expect(result).toBe('agua de jamaica');
+  });
+
+  test('"del refresco" + lastEntity="arroz con leche" → "refresco" (standalone, not "arroz del refresco")', () => {
+    const result = extractFollowUpEntity('del refresco', { value: 'arroz con leche', type: 'product' });
+    expect(result).toBe('refresco');
   });
 });
 
@@ -2182,8 +2179,6 @@ describe('Flujo: descripcion context → follow-up con artículo → no encontra
 describe('Estructura: que + [entidad] + tienen', () => {
   const BUSINESS_ID = 1;
 
-  const { extractEntityCandidate } = require('../../src/services/entityDetector');
-
   // ── extractEntityCandidate ────────────────────────────────────────────────
 
   test('"que hamburguesas tienen" → extrae "hamburguesas"', () => {
@@ -2310,17 +2305,14 @@ describe('Estructura: que [intent-word] tienen → infiere intent correcto', () 
   // ── Blocklist: palabras de intención no extraídas como entidad ────────────
 
   test('"que horarios tienen" NO extrae "horarios" como entidad producto', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('que horarios tienen')).toBeNull();
   });
 
   test('"que precios tienen" NO extrae "precios" como entidad producto', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('que precios tienen')).toBeNull();
   });
 
   test('"que ubicacion tienen" NO extrae "ubicacion" como entidad producto', () => {
-    const { extractEntityCandidate } = require('../../src/services/entityDetector');
     expect(extractEntityCandidate('que ubicacion tienen')).toBeNull();
   });
 
@@ -2526,6 +2518,27 @@ describe('Flujo catálogo → categorías → selección (2 turnos completos)', 
     expect(decision.strategy).not.toBe('ai');
     expect(replyText).not.toMatch(/no estoy seguro/i);
     expect(replyText).toContain('Producto 1');
+  });
+
+  test('turno 2: pregunta puntual sobre producto no repromptea lista de categorías', async () => {
+    // Reproduce: chat mostró categorías, usuario preguntó por producto específico.
+    // Esperado: pipeline busca el producto (entity), NO devuelve "No identifiqué esa categoría".
+    const id = sid();
+    await updateContext(BUSINESS_ID, id, {
+      lastIntent: 'category_selection',
+      availableCategories: CATS,
+    });
+    mockDbFlow({ allProducts: makeProducts(20), catProducts: [], countResult: 0 });
+
+    const { decision, replyText } = await processMessage({
+      text: 'de casualidad tienes refresco?',
+      sessionId: id,
+      businessId: BUSINESS_ID,
+    });
+
+    // Must NOT reprompt category list
+    expect(decision.strategy).not.toBe('category_reprompt');
+    expect(replyText).not.toMatch(/no identif[iqué]+\s+esa categor[íi]a/i);
   });
 
   test('flujo completo con "¿qué tienen?" → categorías → selección', async () => {

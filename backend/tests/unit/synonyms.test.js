@@ -1,32 +1,14 @@
-'use strict';
-
-/**
- * tests/unit/synonyms.test.js
- *
- * Tests for the synonyms.js vocabulary module.
- *
- * Coverage:
- *   - getSynonym(): scoped lookup by business category
- *   - getSynonymsAcrossCategories(): global cross-bucket lookup
- *   - getSynonymsByBusinessId(): DB-scoped lookup with cache
- *   - getCategories(): returns all available categories
- *   - Bidirectional reverse-mapping: every synonym also returns its source
- *   - Normalization: handles accents, uppercase, extra spaces
- *   - Multiple business types: restaurante, hardware, farmacia, papeleria, ropa, otro
- */
-
 // ─── Mock DB ─────────────────────────────────────────────────────────────────
 jest.mock('../../src/config/database', () => ({ query: jest.fn() }));
 
-const db = require('../../src/config/database');
-
-const {
+import db from '../../src/config/database.js';
+import {
   SYNONYM_MAP,
   getSynonym,
   getSynonymsAcrossCategories,
   getSynonymsByBusinessId,
   getCategories,
-} = require('../../src/services/synonyms');
+} from '../../src/services/synonyms.js';
 
 beforeEach(() => {
   jest.clearAllMocks();

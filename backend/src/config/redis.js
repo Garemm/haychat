@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/config/redis.js
  *
@@ -21,12 +19,12 @@
  *                       continúa sin contexto (degradación elegante).
  */
 
-const Redis = require('ioredis');
-const env   = require('./env');
+import Redis from 'ioredis';
+import { REDIS_HOST, REDIS_PORT } from './env.js';
 
 const redis = new Redis({
-  host: env.REDIS_HOST,
-  port: env.REDIS_PORT,
+  host: REDIS_HOST,
+  port: REDIS_PORT,
   lazyConnect: true,
   retryStrategy: (times) => {
     if (times > 3) return null; // stop retrying — chat continues without Redis
@@ -63,5 +61,5 @@ redis.on('reconnecting', () => {
  */
 function isRedisUp() { return !_redisDown; }
 
-module.exports = redis;
-module.exports.isRedisUp = isRedisUp;
+export { isRedisUp };
+export default redis;

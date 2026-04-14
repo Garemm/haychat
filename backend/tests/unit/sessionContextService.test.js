@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * tests/unit/sessionContextService.test.js
  *
@@ -15,24 +13,30 @@
  */
 
 // ─── Mock de ioredis ─────────────────────────────────────────────────────────
-const store     = new Map();
-const listStore = new Map();
-
-const mockRedisInstance = {
-  get:    jest.fn(async (key)             => store.get(key) ?? null),
-  setex:  jest.fn(async (key, _ttl, val)  => { store.set(key, val); return 'OK'; }),
-  rpush:  jest.fn(async (key, val)        => { const l = listStore.get(key) || []; l.push(val); listStore.set(key, l); return l.length; }),
-  lrange: jest.fn(async (key, s, e)       => { const l = listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
-  expire: jest.fn(async ()                => 1),
-  on:     jest.fn(),
-};
-
 jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => mockRedisInstance);
+  const _store     = new Map();
+  const _listStore = new Map();
+  const inst = {
+    get:    jest.fn(async (key)             => _store.get(key) ?? null),
+    setex:  jest.fn(async (key, _ttl, val)  => { _store.set(key, val); return 'OK'; }),
+    rpush:  jest.fn(async (key, val)        => { const l = _listStore.get(key) || []; l.push(val); _listStore.set(key, l); return l.length; }),
+    lrange: jest.fn(async (key, s, e)       => { const l = _listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
+    expire: jest.fn(async ()                => 1),
+    on:     jest.fn(),
+  };
+  // Populate global refs so test code can access them after module load
+  global.__scsStore     = _store;
+  global.__scsListStore = _listStore;
+  global.__scsInstance  = inst;
+  return jest.fn().mockImplementation(() => inst);
 });
 
-// Importamos DESPUÉS de registrar el mock
-const { getContext, updateContext, EMPTY_CONTEXT } = require('../../src/services/sessionContextService');
+import { getContext, updateContext, EMPTY_CONTEXT } from '../../src/services/sessionContextService.js';
+
+// Global refs are populated by the factory which runs during module load above
+var store             = global.__scsStore;
+var listStore         = global.__scsListStore;
+var mockRedisInstance = global.__scsInstance;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

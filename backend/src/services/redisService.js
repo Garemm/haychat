@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/services/redisService.js
  *
@@ -31,8 +29,7 @@
  *   (without history or context) even when Redis is unreachable.
  */
 
-const redis = require('../config/redis');
-const { isRedisUp } = require('../config/redis');
+import redis, { isRedisUp } from '../config/redis.js';
 
 // ─── TTL constants ─────────────────────────────────────────────────────────────
 const CTX_TTL_SECONDS  = 600;    // 10 minutes — conversational context window
@@ -336,7 +333,7 @@ async function addRejectedEntity(businessId, sessionId, entityValue) {
 }
 
 // ─── Exports ───────────────────────────────────────────────────────────────────
-module.exports = {
+export {
   // Context
   getContext,
   updateContext,

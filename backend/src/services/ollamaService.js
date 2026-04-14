@@ -35,15 +35,15 @@
  *   OLLAMA_TIMEOUT_MS  — HTTP timeout in milliseconds  (default: 30000)
  */
 
-const env = require('../config/env');
-const BusinessModel = require('../models/businessModel');
-const { getHistory } = require('./redisService');
+import { OLLAMA_URL as _OLLAMA_URL, OLLAMA_MODEL as _OLLAMA_MODEL, OLLAMA_TIMEOUT_MS as _OLLAMA_TIMEOUT_MS } from '../config/env.js';
+import BusinessModel from '../models/businessModel.js';
+import { getHistory } from './redisService.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const OLLAMA_URL        = env.OLLAMA_URL        || 'http://localhost:11434';
-const OLLAMA_MODEL      = env.OLLAMA_MODEL      || 'llama3:latest';
-const OLLAMA_TIMEOUT_MS = env.OLLAMA_TIMEOUT_MS || 30_000;
+const OLLAMA_URL        = _OLLAMA_URL        || 'http://localhost:11434';
+const OLLAMA_MODEL      = _OLLAMA_MODEL      || 'llama3:latest';
+const OLLAMA_TIMEOUT_MS = _OLLAMA_TIMEOUT_MS || 30_000;
 
 // ─── Business profile cache ───────────────────────────────────────────────────
 
@@ -356,7 +356,7 @@ async function warmupOllama() {
   }
 }
 
-module.exports = {
+export {
   generateOllamaResponse,
   buildSystemPrompt,
   formatRagBlock,

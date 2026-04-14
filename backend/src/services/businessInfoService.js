@@ -10,7 +10,7 @@
  * method that handles it.
  */
 
-const BusinessModel = require('../models/businessModel');
+import BusinessModel from '../models/businessModel.js';
 
 /**
  * Maps each intent key to the BusinessModel method that handles it.
@@ -101,7 +101,7 @@ async function getServiceByName(businessId, name) {
   return BusinessModel.getServiceByName(businessId, name);
 }
 
-module.exports = {
+export {
   getBusinessInfoByIntent,
   getHorariosByDay,
   getCategories,

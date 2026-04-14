@@ -1,19 +1,7 @@
-'use strict';
-
-/**
- * tests/unit/businessInfoService.test.js
- *
- * Unit tests for src/services/businessInfoService.js
- *
- * The BusinessModel is fully mocked — no real DB connection is made.
- * Tests verify that getBusinessInfoByIntent() calls the correct model
- * method for each intent and correctly propagates errors.
- */
-
 jest.mock('../../src/models/businessModel');
 
-const BusinessModel = require('../../src/models/businessModel');
-const { getBusinessInfoByIntent } = require('../../src/services/businessInfoService');
+import BusinessModel from '../../src/models/businessModel.js';
+import { getBusinessInfoByIntent } from '../../src/services/businessInfoService.js';
 
 const BUSINESS_ID = 1;
 

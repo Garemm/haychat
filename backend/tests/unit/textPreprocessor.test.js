@@ -1,20 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/textPreprocessor.test.js
- *
- * Unit tests for src/services/textPreprocessor.js
- *
- * Tests cover:
- *   - levenshtein(): edit distance
- *   - expandAbbreviations(): exact-token expansion
- *   - correctTypos(): typo dict + Levenshtein correction
- *   - singularizeTokens(): plural → singular for entity candidates
- *   - buildValidSet(): domain word protection
- *   - preprocessMessage(): full pipeline (normalize + abbreviations + typos)
- */
-
-const {
+import {
   levenshtein,
   expandAbbreviations,
   correctTypos,
@@ -24,7 +8,8 @@ const {
   preprocessMessage,
   TYPO_DICT,
   ABBREVIATIONS,
-} = require('../../src/services/textPreprocessor');
+} from '../../src/services/textPreprocessor.js';
+import { extractEntityCandidate } from '../../src/services/entityDetector.js';
 
 // ─── levenshtein() ────────────────────────────────────────────────────────────
 
@@ -341,7 +326,6 @@ describe('ABBREVIATIONS coverage', () => {
 // ─── Entity extraction integration (with singularization) ────────────────────
 
 describe('extraction: plural/typo/natural-phrase integration', () => {
-  const { extractEntityCandidate } = require('../../src/services/entityDetector');
 
   test('singular candidate from plural: "tienes cables usb" — candidate is NOT singularized', () => {
     // extractEntityCandidate returns the raw candidate; wordVariants handles plural search in DB

@@ -1,12 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/dayDetector.test.js
- *
- * Unit tests for src/services/dayDetector.js
- */
-
-const { detectDay, DAY_MAP, DAY_DISPLAY, getDayDisplayName } = require('../../src/services/dayDetector');
+import { detectDay, DAY_MAP, DAY_DISPLAY, getDayDisplayName } from '../../src/services/dayDetector.js';
 
 // ─── detectDay() ──────────────────────────────────────────────────────────────
 

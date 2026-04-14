@@ -53,4 +53,4 @@ function detectDay(normalizedText) {
   return null;
 }
 
-module.exports = { detectDay, DAY_MAP, DAY_DISPLAY, getDayDisplayName };
+export { detectDay, DAY_MAP, DAY_DISPLAY, getDayDisplayName };

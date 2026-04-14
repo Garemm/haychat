@@ -11,21 +11,25 @@
  *   4. Init Socket.io
  */
 
-require('dotenv').config();
-const { createServer } = require('http');
-const fs   = require('fs');
-const path = require('path');
-const app = require('./src/app');
-const { initSocket } = require('./src/sockets/chatSocket');
-const { PORT, NODE_ENV } = require('./src/config/env');
-const { warmupOllama } = require('./src/services/ollamaService');
-const { bootstrapIntents } = require('./src/services/intentExpanderService');
-const { initIntents }      = require('./src/services/intentDetector');
-const db = require('./src/config/database');
+import 'dotenv/config';
+import { createServer } from 'http';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import app from './src/app.js';
+import { initSocket } from './src/sockets/chatSocket.js';
+import { PORT, NODE_ENV } from './src/config/env.js';
+import { warmupOllama } from './src/services/ollamaService.js';
+import { bootstrapIntents } from './src/services/intentExpanderService.js';
+import { initIntents } from './src/services/intentDetector.js';
+import db from './src/config/database.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = dirname(__filename);
 
 /** Run ticket.sql on every startup — all statements are idempotent (IF NOT EXISTS). */
 async function runMigrations() {
-  const sql = fs.readFileSync(path.join(__dirname, 'src/config/ticket.sql'), 'utf8');
+  const sql = fs.readFileSync(join(__dirname, 'src/config/ticket.sql'), 'utf8');
   // Strip single-line comments and split on semicolons so each statement
   // is sent individually (avoids issues with pg multi-statement parsing).
   const statements = sql

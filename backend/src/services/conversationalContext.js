@@ -163,7 +163,7 @@ function buildContextUpdate(detectedProduct, detectedIntent) {
   return {};
 }
 
-module.exports = {
+export {
   resolveEffectiveContext,
   buildContextUpdate,
   extractFollowUpProduct,

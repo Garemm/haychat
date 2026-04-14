@@ -86,6 +86,44 @@ function hasSignal(segment) {
   return segment.split(/\s+/).some((w) => SIGNAL_WORDS.has(w));
 }
 
+/**
+ * Interrogative words that, when they start a segment of ≥ 2 tokens, indicate
+ * the segment is an independent sub-query clause — even with no SIGNAL_WORDS.
+ * e.g. "que refrescos", "que postres", "cuantos modelos"
+ *
+ * Using a separate helper (rather than adding "que" to SIGNAL_WORDS) avoids
+ * false positives on product-name fragments like "agua de que" or
+ * compound nouns that happen to contain "que".
+ */
+const _INTERROGATIVES_START = new Set([
+  'que', 'cual', 'cuales', 'cuanto', 'cuantos', 'cuanta', 'cuantas',
+  'donde', 'cuando', 'como',
+]);
+
+/**
+ * Returns true when the segment begins with an interrogative word AND has at
+ * least one additional token (i.e. it forms a real clause, not a lone "que").
+ *
+ * @param {string} segment  Normalized text
+ * @returns {boolean}
+ */
+function startsWithInterrogative(segment) {
+  const tokens = segment.split(/\s+/);
+  return tokens.length >= 2 && _INTERROGATIVES_START.has(tokens[0]);
+}
+
+/**
+ * A segment "has a right-side signal" when it either contains a signal word OR
+ * begins with an interrogative word followed by at least one more token.
+ * Used specifically to evaluate the right side of a weak connector.
+ *
+ * @param {string} segment
+ * @returns {boolean}
+ */
+function hasSignalOrClause(segment) {
+  return hasSignal(segment) || startsWithInterrogative(segment);
+}
+
 // ─── Connector definitions ────────────────────────────────────────────────────
 
 /**
@@ -169,7 +207,7 @@ function findSplit(text) {
 
     // Weak connector — require signal presence
     const leftHas  = hasSignal(left);
-    const rightHas = hasSignal(right);
+    const rightHas = hasSignalOrClause(right);
 
     // For short messages (≤ 7 words) both sides must have signals
     if (wordCount <= 7 && !(leftHas && rightHas)) continue;
@@ -310,4 +348,4 @@ function joinResponses(first, second, connectorType) {
   return `${first}\n\n${bridge}${secondFormatted}`;
 }
 
-module.exports = { parseMultiIntent, joinResponses, hasSignal };
+export { parseMultiIntent, joinResponses, hasSignal, startsWithInterrogative, hasSignalOrClause };

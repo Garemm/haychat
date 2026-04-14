@@ -1,33 +1,17 @@
-'use strict';
-
-/**
- * tests/unit/entityDetector.test.js
- *
- * Unit tests for src/services/entityDetector.js
- *
- * Tests cover:
- *   - extractEntityCandidate(): regex + NLP fallback extraction
- *   - detectEntities(): DB-mocked multi-type entity detection
- *   - formatProductResponse(): product formatting
- *   - isBlocklisted(): blocklist guard
- *   - stripLeadingStopwords(): stopword stripping
- *
- * The `database` module is mocked so these tests never touch PostgreSQL.
- */
-
 jest.mock('../../src/config/database', () => ({
   query: jest.fn(),
 }));
 
-const db = require('../../src/config/database');
-const {
+import db from '../../src/config/database.js';
+import {
   detectEntities,
   extractEntityCandidate,
   formatProductResponse,
   formatCategoryResponse,
   isBlocklisted,
   stripLeadingStopwords,
-} = require('../../src/services/entityDetector');
+} from '../../src/services/entityDetector.js';
+import { normalize } from '../../src/services/normalize.js';
 
 beforeEach(() => {
   db.query.mockReset();
@@ -292,14 +276,12 @@ describe('extractEntityCandidate() — ñ y guión bajo', () => {
     // The underscore is stripped by normalize() before detection runs
     // so the entity is extracted cleanly.
     // We call extractEntityCandidate with already-normalized text (as the pipeline does).
-    const { normalize } = require('../../src/services/normalize');
     const normalized = normalize('tienen hamburguesas_');
     expect(normalized).toBe('tienen hamburguesas');
     expect(extractEntityCandidate(normalized)).toBe('hamburguesas');
   });
 
   test('"tienen buñuelos_" — ñ preservada, guión bajo eliminado', () => {
-    const { normalize } = require('../../src/services/normalize');
     const normalized = normalize('tienen buñuelos_');
     expect(normalized).toBe('tienen buñuelos');
     expect(extractEntityCandidate(normalized)).toBe('buñuelos');

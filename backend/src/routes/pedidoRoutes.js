@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/routes/pedidoRoutes.js
  *
@@ -11,9 +9,9 @@
  *   room (businessId:sessionId) so the receipt card updates in real-time.
  */
 
-const { Router }   = require('express');
-const PedidoModel  = require('../models/pedidoModel');
-const { getIO }    = require('../sockets/chatSocket');
+import { Router } from 'express';
+import PedidoModel from '../models/pedidoModel.js';
+import { getIO } from '../sockets/chatSocket.js';
 
 const router = Router();
 
@@ -119,4 +117,4 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
-module.exports = router;
+export default router;

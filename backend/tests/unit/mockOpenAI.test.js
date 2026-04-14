@@ -1,16 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/mockOpenAI.test.js
- *
- * Unit tests for:
- *   - mockOpenAI.getMockOpenAIResponse()
- *
- * Verifica que la función genera respuestas correctas según el contexto
- * de sesión recibido (lastProduct, lastIntent, sin contexto).
- */
-
-const { getMockOpenAIResponse } = require('../../src/temp/mockOpenAI');
+import { getMockOpenAIResponse } from '../../src/temp/mockOpenAI.js';
 
 // ─── Sin contexto ─────────────────────────────────────────────────────────────
 

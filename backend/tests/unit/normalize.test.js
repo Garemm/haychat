@@ -1,17 +1,4 @@
-'use strict';
-
-/**
- * tests/unit/normalize.test.js
- *
- * Unit tests for src/services/normalize.js
- *
- * Tests cover:
- *   - normalize(): full normalization pipeline
- *   - toSingular(): Spanish plural → singular conversion
- *   - wordVariants(): word + singular form array
- */
-
-const { normalize, toSingular, wordVariants } = require('../../src/services/normalize');
+import { normalize, toSingular, wordVariants } from '../../src/services/normalize.js';
 
 // ─── normalize() ─────────────────────────────────────────────────────────────
 

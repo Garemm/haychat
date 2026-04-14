@@ -97,9 +97,9 @@
  *   await initIntents();        // carga de Redis → memoria del proceso
  */
 
-const baseIntents = require('../mockai/intents');
-const { normalize } = require('./normalize');
-const { saveExpandedIntents, getExpandedIntents } = require('./redisService');
+import baseIntents from '../mockai/intents.js';
+import { normalize } from './normalize.js';
+import { saveExpandedIntents, getExpandedIntents } from './redisService.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // R4 — VERB_GROUPS
@@ -468,13 +468,13 @@ async function bootstrapIntents() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
-module.exports = {
+export {
   // Production boot entry point
   bootstrapIntents,
   // Exposed for tests and manual inspection
   expandIntents,
   expandKeywords,
-  expandPhrase: expandMultiword,
+  expandMultiword as expandPhrase,
   toPlural,
   // Rule tables (read-only)
   VERB_GROUPS,

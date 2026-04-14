@@ -26,18 +26,17 @@
  *           clear intent in message → IGNORE previous context entity.
  */
 
-const { normalize } = require('./normalize');
-const { preprocessMessage } = require('./textPreprocessor');
-const { detectNegation } = require('./textPreprocessor');
-const { detectIntent, isStandaloneIntent } = require('./intentDetector');
-const { detectEntities, queryProducts, queryCategories, formatProductResponse, formatPartialMatchResponse } = require('./entityDetector');
-const { getSynonymsAcrossCategories, getSynonymsByBusinessId } = require('./synonyms');
-const { detectDay } = require('./dayDetector');
-const { getContext, updateContext } = require('./sessionContextService');
-const { pushTurnMemory, addRejectedEntity } = require('./redisService');
-const { parseMultiIntent, joinResponses } = require('./multiIntentParser');
-const { logProductQuery } = require('./queryLogService');
-const {
+import { normalize } from './normalize.js';
+import { preprocessMessage, detectNegation } from './textPreprocessor.js';
+import { detectIntent, isStandaloneIntent } from './intentDetector.js';
+import { detectEntities, queryProducts, queryCategories, formatProductResponse, formatPartialMatchResponse } from './entityDetector.js';
+import { getSynonymsAcrossCategories, getSynonymsByBusinessId } from './synonyms.js';
+import { detectDay } from './dayDetector.js';
+import { getContext, updateContext } from './sessionContextService.js';
+import { pushTurnMemory, addRejectedEntity } from './redisService.js';
+import { parseMultiIntent, joinResponses } from './multiIntentParser.js';
+import { logProductQuery } from './queryLogService.js';
+import {
   getBusinessInfoByIntent,
   getHorariosByDay,
   getCategories,
@@ -45,14 +44,14 @@ const {
   countProductosByCategory,
   getProductAttributes,
   getServiceByName,
-} = require('./businessInfoService');
-const { formatIntentResponse, formatHorarioDay, formatList, formatDescripcionResponse, formatProductAttributes, formatServiceDetail, formatServiceWithContact } = require('./intentResponseFormatter');
-const { getKeywordResponse } = require('../mockai/keywordResponses');
-const { getMockOpenAIResponse } = require('../temp/mockOpenAI');
-const { shouldUseAI } = require('./aiDecisionEngine');
-const { handleAIGate } = require('./subscriptionController');
-const { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } = require('./attributeSearchService');
-const { extractAttribute } = require('./attributeExtractor');
+} from './businessInfoService.js';
+import { formatIntentResponse, formatHorarioDay, formatList, formatDescripcionResponse, formatProductAttributes, formatServiceDetail, formatServiceWithContact } from './intentResponseFormatter.js';
+import { getKeywordResponse } from '../mockai/keywordResponses.js';
+import { getMockOpenAIResponse } from '../temp/mockOpenAI.js';
+import { shouldUseAI } from './aiDecisionEngine.js';
+import { handleAIGate } from './subscriptionController.js';
+import { searchByAttributes, searchByCompoundQuery, searchByCategoryAttribute, formatAttributeResponse, formatCompoundQueryResponse, formatCategoryAttributeResponse } from './attributeSearchService.js';
+import { extractAttribute } from './attributeExtractor.js';
 
 /** Minimum score to consider intent as "high confidence" (skip context). */
 const HIGH_CONFIDENCE_THRESHOLD = 3;
@@ -114,6 +113,11 @@ const SEE_MORE_PATTERNS = [
   /^mas resultados$/,
   /^continuar$/,
   /^mas opciones$/,
+  // "otras mas" / "otros mas" — colloquial "show me more (of the others)"
+  /^otras?\s+mas$/,
+  /^otras?\s+opciones$/,
+  /^ver\s+otras?$/,
+  /^otras?\s+mas\s+opciones$/,
 ];
 
 function isSeekingMore(normalizedText) {
@@ -354,6 +358,14 @@ const QUESTION_WORDS = new Set([
 function enrichFollowUpCandidate(candidate, contextValue) {
   const PREP_PREFIX = /^(?:de[l]?|con|en|al|a)\s+/;
   if (!PREP_PREFIX.test(candidate) || !contextValue) return candidate;
+
+  // "del X" — contracted de+el — the candidate IS a standalone product reference
+  // (e.g. "del agua de jamaica" → "agua de jamaica").
+  // Never prepend the context entity; just strip the contracted article.
+  if (/^del\s+/.test(candidate)) {
+    return candidate.replace(/^del\s+/, '');
+  }
+
   // Extract base of context entity (everything before the first preposition)
   const baseMatch = contextValue.match(/^(.+?)\s+(?:de[l]?|con|en|al|a)\s+/);
   if (baseMatch?.[1]) {
@@ -432,6 +444,9 @@ function extractFollowUpEntity(normalizedText, lastEntity) {
     // Copula verb forms — "es natural?", "están frescos?" are yes/no questions about the
     // current context product, not product-name candidates.
     'es', 'estan',
+    // Continuation / pagination words — "otras mas", "mas", "otras" are never product names.
+    // "otras mas" means "show me more"; letting it through stores a corrupted entity.
+    'otras', 'otros', 'mas',
   ]);
   const tokens = normalizedText.split(/\s+/);
   // Allow leading articles in the token count — they'll be stripped after the check.
@@ -502,8 +517,11 @@ function decide(intentResult, entityResult, context, normalizedText) {
   //   1. Standalone intent (e.g. "que servicios tienen") — let through normally.
   //   2. Attribute entity detected (e.g. "tiene algo con pollo?") — skip re-prompt
   //      so the attribute search path handles it directly instead of looping.
+  //   3. Product/category entity explicitly detected in the current message
+  //      (e.g. "de casualidad tienes refresco?") — the user is asking about a
+  //      specific item, not selecting from the category list; let Rule 2 handle it.
   const isAttributeEntity = entityResult.type === 'attribute';
-  if (context.lastIntent === 'category_selection' && context.availableCategories?.length > 0 && !(hasIntent && standalone) && !isAttributeEntity) {
+  if (context.lastIntent === 'category_selection' && context.availableCategories?.length > 0 && !(hasIntent && standalone) && !isAttributeEntity && !hasEntity) {
     return {
       strategy: 'category_reprompt',
       intent: null,
@@ -1831,7 +1849,7 @@ async function processMessage({ text, sessionId, businessId }) {
   return { replyText, decision, logs };
 }
 
-module.exports = {
+export {
   processMessage,
   decide,
   buildContextUpdate,

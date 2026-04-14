@@ -9,7 +9,7 @@
  * ADD NEW INTENTS: add a new method here and register it in businessInfoService.js.
  */
 
-const db = require('../config/database');
+import db from '../config/database.js';
 
 const BusinessModel = {
   /**
@@ -378,4 +378,4 @@ const BusinessModel = {
   },
 };
 
-module.exports = BusinessModel;
+export default BusinessModel;

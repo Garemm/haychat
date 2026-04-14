@@ -80,11 +80,20 @@ texto crudo del usuario
 ┌─────────────────────────────────────────────┐
 │ PASO 1 — preprocessMessage()                │
 │  textPreprocessor.js                        │
-│  ● normalize()  → minúsculas, sin tildes    │
-│  ● stripLeadingConnector()  → quita "pero","y"│
-│  ● expandAbbreviations()   → "xq" → "porque"│
-│  ● correctTypos()          → TYPO_DICT +    │
-│    Levenshtein distancia ≤ 1                │
+│  ● normalize()             → minúsculas, sin tildes, sin puntuación  │
+│  ● cleanUserInput()        → elimina frases filler al inicio         │
+│      FILLER_PHRASES_ES: "quiero saber si", "de casualidad",          │
+│      "me puedes decir", "quisiera saber", "por casualidad", etc.     │
+│      Iterativo (filtra frases apiladas). Fallback si resultado < 20% │
+│  ● expandAbbreviations()   → "xq" → "porque"                        │
+│  ● stripLeadingConnector() → quita "pero","y","bueno","mira"…        │
+│  ● restructureSentence()   → OV → VO cuando hay verbo al final       │
+│      "hamburguesa tienes" → "tienes hamburguesa"                     │
+│      "envios tambien hacen" → "hacen envios"                         │
+│      GUARDS: no aplica si el 1er token es interrogativo ("que","como")│
+│              ni si algún token del objeto ES interrogativo            │
+│              (protege "de postres que tienes" de ser manglado)        │
+│  ● correctTypos()          → TYPO_DICT + Levenshtein distancia ≤ 1   │
 └─────────────────┬───────────────────────────┘
                   │  normalizedText
                   ▼
@@ -126,6 +135,8 @@ texto crudo del usuario
 │      "algo con queso", "para madera"        │
 │  4d. Patrones especiales                    │
 │      TIPO_DE_RE / QUE_ENTITY_TIENEN_RE      │
+│      DE_X_QUE_TIENES_RE  ← nuevo           │
+│      (ej: "de postres que tienes" → entity=postres)                  │
 │      → queryCategories primero, luego prod  │
 │  4e. extractEntityCandidate() → DB ILIKE    │
 │      candidate con " con ":                 │
@@ -200,8 +211,10 @@ Texto ya normalizado + intentResult + entityResult + context
         │    detectCategorySelection() → strategy='category_select'
         │
         ├─ Pre-Regla -1c — category_selection sin match → strategy='category_reprompt'
-        │    EXCEPCIÓN: entityResult.type='attribute' → saltar
+        │    EXCEPCIÓN 1: entityResult.type='attribute' → saltar
         │    (ej: "tiene algo con pollo?" no repromptea lista de categorías)
+        │    EXCEPCIÓN 2: hasEntity=true (product/category detectado) → saltar
+        │    (ej: "de casualidad tienes refresco?" busca el producto, no repromptea)
         │
         ├─ Pre-Regla -1d — comprar + pronombre + lastEntityFound=false
         │    → strategy='product_not_found_followup'

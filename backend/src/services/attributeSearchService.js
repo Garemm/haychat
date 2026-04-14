@@ -19,9 +19,9 @@
  *   e.g. [{ value: "queso" }, { value: "pollo" }] → products with BOTH.
  */
 
-const db  = require('../config/database');
-const { wordVariants } = require('./normalize');
-const { isMaterial } = require('./attributeExtractor');
+import db from '../config/database.js';
+import { wordVariants } from './normalize.js';
+import { isMaterial } from './attributeExtractor.js';
 
 /** Maximum results to return per attribute search. */
 const ATTR_SEARCH_LIMIT = 20;
@@ -537,7 +537,7 @@ function formatAttributeResponse(attributes, rows, strategy = 'AND') {
   return `Sí 😊, tenemos ${rows.length} opciones con ${label}: ${listed}.${strategyNote} ¿Cuál te interesa?`;
 }
 
-module.exports = {
+export {
   searchByAttribute,
   searchByAttributes,
   searchByCompoundQuery,

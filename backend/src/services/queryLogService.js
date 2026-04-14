@@ -9,7 +9,7 @@
  * Non-fatal: errors are logged to console only — never throw to callers.
  */
 
-const db = require('../config/database');
+import db from '../config/database.js';
 
 /**
  * Increments the query counter for one or more products.
@@ -35,4 +35,4 @@ async function logProductQuery(businessId, productIds) {
   }
 }
 
-module.exports = { logProductQuery };
+export { logProductQuery };

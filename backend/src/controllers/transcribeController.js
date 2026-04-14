@@ -86,4 +86,4 @@ async function transcribe(req, res, next) {
   }
 }
 
-module.exports = { transcribe };
+export { transcribe };

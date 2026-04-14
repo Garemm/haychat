@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * src/services/nlpEntityExtractor.js
  *
@@ -43,8 +41,8 @@
  *      the same extractAndRespond(message) → string|null contract.
  */
 
-const nlp = require('compromise');
-const db  = require('../config/database');
+import nlp from 'compromise';
+import db from '../config/database.js';
 
 // Default business — change per conversation once multi-tenant is implemented
 const DEFAULT_BUSINESS_ID = 1;
@@ -344,7 +342,7 @@ async function extractAndRespond(message, businessId = DEFAULT_BUSINESS_ID) {
   return formatProductResponse(entity, products);
 }
 
-module.exports = {
+export {
   extractAndRespond,
   // Exported for reuse: context-aware pipeline in chatSocket.js
   normalize,

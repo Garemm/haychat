@@ -27,4 +27,4 @@ function getKeywordResponse(userMessage) {
   return null;
 }
 
-module.exports = { getKeywordResponse };
+export { getKeywordResponse };

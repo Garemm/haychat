@@ -31,10 +31,10 @@
  *   3. Si ∈ {4,5}   → RAG filter → llama3 → fallback mock si Ollama está caído.
  */
 
-const BusinessModel              = require('../models/businessModel');
-const { filterRelevantData }     = require('./ragFilterService');
-const { generateOllamaResponse } = require('./ollamaService');
-const { getRAGOpenAIResponse }   = require('../temp/mockOpenAI');
+import BusinessModel from '../models/businessModel.js';
+import { filterRelevantData } from './ragFilterService.js';
+import { generateOllamaResponse } from './ollamaService.js';
+import { getRAGOpenAIResponse } from '../temp/mockOpenAI.js';
 
 // ─── Definición de planes ─────────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ async function handleAIGate({ businessId, originalText, normalizedText, intentRe
   return { text: fallbackText, aiUsed: true, ragContext, plan };
 }
 
-module.exports = {
+export {
   handleAIGate,
   getSubscriptionPlan,
   // Plan constants — exportados para tests y otros módulos
