@@ -249,6 +249,8 @@ function extractServiceQuery(normalizedText) {
     /\bque\s+(?:precio|costo|valor|tarifa|cuesta|cobran?)\s+(?:tiene[ns]?|es|cobran?|hay)?\s*(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
     // "cuanto cuesta/vale/cobran [por] X"
     /\bcuanto\s+(?:cuesta[n]?|vale[n]?|cobran?(?:\s+por)?)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
+    // "en cuanto tiene/tienes/tienen X" / "a cuanto tiene X" — Mexican Spanish price query
+    /\b(?:en|a)\s+cuanto\s+tiene[sn]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,
     // Description queries about a service: "que incluye/contiene/trae/lleva/es X"
     // Strip the verb phrase to get just the service-name portion.
     /\bque\s+(?:incluye[n]?|contiene[n]?|trae[n]?|lleva[n]?|es|son)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+?)(?:\?|$)/,

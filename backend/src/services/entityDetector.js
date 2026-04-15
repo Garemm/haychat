@@ -171,6 +171,9 @@ const PRODUCT_QUERY_PATTERNS = [
   /tienen\s+disponible\s+(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /hay\s+disponibilidad\s+de\s+(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /cu[ae]nto\s+(?:cuesta|vale|sale|cobran\s+por)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  // "en cuanto tiene/tienes/tienen [las] tortas de carnitas" / "a cuanto tiene X"
+  // Mexican price query — placed before generic tiene[sn]? so it takes priority when "en/a cuanto" is present.
+  /\b(?:en|a)\s+cuanto\s+tiene[sn]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   // "que precio tiene la hamburguesa" / "cual es el precio de la pizza" / "cual es el precio del arroz"
   // The second form handles "del" (contracted de+el) directly after "precio".
   /(?:que\s+|cual\s+es\s+(?:el\s+)?)?precio\s+(?:tiene[n]?|cuesta|cobran|vale|sale)\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,

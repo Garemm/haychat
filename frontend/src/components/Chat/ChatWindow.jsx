@@ -87,7 +87,10 @@ const ChatWindow = () => {
         </motion.div>
 
         <div className="chat-header__info">
-          <div className="chat-header__name">{displayName}</div>
+          <span className="chat-header__brand">hayChat Business</span>
+          <div className="chat-header__name">
+            {displayName}
+          </div>
           <div className={statusClass}>
             <span className="chat-header__dot" aria-hidden="true" />
             {statusText}

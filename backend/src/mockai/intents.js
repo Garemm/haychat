@@ -331,6 +331,12 @@ horarios: {
     { phrase: 'cuanto cuestan esos', weight: 3 },
     { phrase: 'cuanto cuesta ese', weight: 3 },
     { phrase: 'en cuanto tienes eso', weight: 3 },
+    { phrase: 'en cuanto tiene', weight: 3 },
+    { phrase: 'en cuanto tienes', weight: 3 },
+    { phrase: 'en cuanto tienen', weight: 3 },
+    { phrase: 'a cuanto tiene', weight: 3 },
+    { phrase: 'a cuanto tienes', weight: 3 },
+    { phrase: 'a cuanto tienen', weight: 3 },
 
     // =========================
     // Frases parciales (weight 2)
