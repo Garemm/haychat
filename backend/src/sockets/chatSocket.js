@@ -26,6 +26,7 @@ import { processMessage } from '../services/messagePipeline.js';
 import { CLIENT_URL } from '../config/env.js';
 import { getContext, updateContext, SESSION_TTL_SECONDS } from '../services/sessionContextService.js';
 import { getHistory, saveMessage as redisSaveMessage } from '../services/redisService.js';
+import { recordVisit, saveName } from '../services/userProfileService.js';
 import { getCategories } from '../services/businessInfoService.js';
 import { formatList } from '../services/intentResponseFormatter.js';
 import BusinessModel from '../models/businessModel.js';
@@ -195,6 +196,9 @@ const initSocket = (httpServer) => {
         // Track which sessionId this socket is using (needed for disconnect cleanup)
         socketSessions.set(socket.id, sessionId);
 
+        // Record activity in user profile (increments visitCount, updates lastSeen)
+        recordVisit(businessId, sessionId).catch(() => {});
+
         const userTimestamp = new Date().toISOString();
 
         // 1. Build and emit user message (shape matches history entries)
@@ -359,6 +363,12 @@ const initSocket = (httpServer) => {
           telefono:      telefono.trim(),
           detallePedido: detallePedido.trim(),
         });
+
+        // Persist the user's name to their long-term profile so the AI can
+        // greet them by name in future messages ("Hola de nuevo, Carlos")
+        if (sessionId) {
+          saveName(businessId, sessionId, nombreCliente).catch(() => {});
+        }
 
         // Emit the full pedido row so the client can display a persistent receipt card.
         socket.emit('pedido_confirmado', {

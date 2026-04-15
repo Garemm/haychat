@@ -7,22 +7,30 @@
  *
  *   Context  (NLP state, short-lived):
  *     key:  ctx:<businessId>:<sessionId>
- *     TTL:  CTX_TTL_SECONDS  (210 s = 3.5 min)
+ *     TTL:  CTX_TTL_SECONDS  (1800 s = 30 min)
  *     type: Redis String (JSON)
  *     use:  lastIntent, lastEntity, pagination — NLP pipeline only
  *
- *   History  (full chat messages, longer-lived):
+ *   History  (full chat messages, sliding TTL):
  *     key:  hist:<businessId>:<sessionId>
- *     TTL:  HIST_TTL_SECONDS (21600 s = 6 h)
+ *     TTL:  HIST_TTL_SECONDS (21600 s = 6 h, resets on every message)
  *     type: Redis List (RPUSH / LRANGE)
- *     use:  message display in UI — never touched by NLP
+ *     use:  message display in UI + Ollama conversation history
+ *
+ *   User Profile  (long-term user memory):
+ *     key:  profile:<businessId>:<sessionId>
+ *     TTL:  30 days (managed by userProfileService.js)
+ *     type: Redis Hash
+ *     use:  name, rejectedEntities, visitCount, preferences
  *
  * ISOLATION GUARANTEE:
- *   Both keys include <businessId> AND <sessionId>, so two users sharing the
+ *   All keys include <businessId> AND <sessionId>, so two users sharing the
  *   same display name can never collide, and business data never crosses tenants.
  *
  * MEMORY SAFETY:
  *   Every write resets the TTL.  No key ever lives indefinitely.
+ *   History TTL is sliding (reset on every message) so active conversations
+ *   never expire mid-session.
  *
  * RESILIENCE:
  *   All functions catch Redis errors and degrade gracefully — the chat works
@@ -30,10 +38,29 @@
  */
 
 import redis, { isRedisUp } from '../config/redis.js';
+import { addRejectedEntity as profileAddRejected } from './userProfileService.js';
 
 // ─── TTL constants ─────────────────────────────────────────────────────────────
-const CTX_TTL_SECONDS  = 600;    // 10 minutes — conversational context window
-const HIST_TTL_SECONDS = 21600;  // 6 hours    — message history window
+// Rule ram-ttl: always set TTL on cache keys to prevent unbounded growth.
+// CTX_TTL: 30 min — generous enough for natural conversation pauses.
+//   10 min was too short: a user who pauses to read a menu for 12 minutes
+//   would lose all NLP context and the bot would lose track of the topic.
+const CTX_TTL_SECONDS  = 1800;   // 30 minutes — conversational context window
+const HIST_TTL_SECONDS = 21600;  // 6 hours     — message history window (sliding)
+
+/**
+ * Maximum messages stored in a history list at write time (LTRIM on every RPUSH).
+ * Rule conn-blocking: prevents LRANGE on unboundedly large lists.
+ * 500 messages ≈ 250 turns — far more than any real chat session needs in memory.
+ */
+const HIST_MAX_MESSAGES = 500;
+
+/**
+ * Maximum messages read from history in a single LRANGE call.
+ * Rule conn-blocking: LRANGE 0 -1 on a large list is a slow command.
+ * Reading the last 200 messages gives ~100 turns — enough for full context.
+ */
+const HIST_READ_LIMIT = 200;
 
 /** Maximum turns kept in topicMemory ring buffer per session. */
 const MAX_TOPIC_MEMORY = 6;
@@ -161,41 +188,31 @@ async function updateContext(businessId, sessionId, data) {
  * @param {string}        sessionId
  * @returns {Promise<Array<{sender: string, text: string, timestamp: string}>>}
  */
+/**
+ * Returns the most recent HIST_READ_LIMIT messages for the session.
+ *
+ * Rule conn-blocking: replaced LRANGE 0 -1 (full scan of the list) with
+ * LRANGE -HIST_READ_LIMIT -1 which reads only the tail.  This is O(1) in
+ * terms of CPU cost regardless of how many messages the session has.
+ *
+ * The old stale-count loop that manually trimmed leading expired messages is
+ * removed.  It is now superseded by:
+ *   1. HIST_TTL_SECONDS expiry on the key itself (key deleted when session ends)
+ *   2. LTRIM to -HIST_MAX_MESSAGES on every write (keeps the list bounded)
+ * Together those two mechanisms ensure LRANGE never reads stale content.
+ *
+ * @param {number|string} businessId
+ * @param {string}        sessionId
+ * @returns {Promise<Array<{sender:string, text:string, timestamp:string}>>}
+ */
 async function getHistory(businessId, sessionId) {
   const key = histKey(businessId, sessionId);
   try {
-    const items = await redis.lrange(key, 0, -1);
+    // Read only the last HIST_READ_LIMIT entries — bounded, O(log N + M) Redis cost.
+    const items = await redis.lrange(key, -HIST_READ_LIMIT, -1);
     if (items.length === 0) return [];
 
-    const cutoff = Date.now() - HIST_TTL_SECONDS * 1000;
-
-    // Count how many leading messages are stale.
-    // Messages are stored oldest-first (RPUSH = append to tail), so all
-    // expired entries are at the front of the list.
-    // Stop counting at the first message that:
-    //   a) has no timestamp (legacy — we can't determine its age, keep it), or
-    //   b) is within the TTL window.
-    let staleCount = 0;
-    for (const raw of items) {
-      let msg;
-      try { msg = JSON.parse(raw); } catch { break; }
-      if (!msg?.timestamp) break;
-      if (new Date(msg.timestamp).getTime() >= cutoff) break;
-      staleCount++;
-    }
-
-    // Physically remove stale entries from Redis to free memory.
-    if (staleCount > 0) {
-      if (staleCount === items.length) {
-        // Every message has expired — delete the key entirely.
-        await redis.del(key);
-        return [];
-      }
-      // Trim the leading stale entries; keep everything from staleCount onward.
-      await redis.ltrim(key, staleCount, -1);
-    }
-
-    return items.slice(staleCount).map((raw) => {
+    return items.map((raw) => {
       try { return JSON.parse(raw); } catch { return null; }
     }).filter(Boolean);
   } catch (err) {
@@ -205,8 +222,14 @@ async function getHistory(businessId, sessionId) {
 }
 
 /**
- * Appends a single message to the session's history list
- * and resets the 6-hour TTL.
+ * Appends a single message to the session's history list and resets the
+ * 6-hour sliding TTL.
+ *
+ * Rule conn-pipelining: batches RPUSH + EXPIRE + LTRIM into a single round
+ * trip instead of 2-3 separate commands.
+ *
+ * Rule conn-blocking: LTRIM keeps the list bounded at HIST_MAX_MESSAGES so
+ * that LRANGE never scans an unboundedly large list.
  *
  * @param {number|string} businessId
  * @param {string}        sessionId
@@ -217,16 +240,17 @@ async function saveMessage(businessId, sessionId, message) {
   const key = histKey(businessId, sessionId);
   try {
     const serialized = JSON.stringify(message);
-    // RPUSH keeps insertion order (oldest first, newest last).
-    // Returns the new list length: 1 means this is the first message.
-    const listLen = await redis.rpush(key, serialized);
-    // Set TTL only when the key is created (first message).
-    // Using a fixed expiry instead of sliding prevents the key from living
-    // indefinitely when users chat every day — the whole key expires 6h after
-    // the session started, and getHistory() additionally filters per-message.
-    if (listLen === 1) {
-      await redis.expire(key, HIST_TTL_SECONDS);
-    }
+    // Pipeline: 3 ops in 1 round trip.
+    //   RPUSH  — append message (oldest-first order)
+    //   EXPIRE — sliding TTL reset on every message so active conversations
+    //            never expire mid-session
+    //   LTRIM  — cap list at HIST_MAX_MESSAGES to prevent unbounded growth
+    //            and protect against slow LRANGE on huge lists
+    await redis.pipeline()
+      .rpush(key, serialized)
+      .expire(key, HIST_TTL_SECONDS)
+      .ltrim(key, -HIST_MAX_MESSAGES, -1)
+      .exec();
   } catch (err) {
     if (isRedisUp()) console.warn('[Redis] saveMessage error:', err.message);
     // Non-fatal: UI may not show this message after refresh, but chat continues
@@ -307,10 +331,12 @@ async function pushTurnMemory(businessId, sessionId, turnData) {
 
 /**
  * Adds a normalized entity value to the rejectedEntities list for the session.
- * Duplicate entries are silently ignored. List is capped at 10 items.
+ * Duplicate entries are silently ignored.
  *
- * Used to persist user negations ("sin gluten", "no quiero carne") so that
- * attribute searches and AI recommendations can filter them out.
+ * Dual-write strategy:
+ *   1. CTX key (10-min TTL)  — used by the NLP pipeline in the current session.
+ *   2. Profile key (30-day TTL) — long-term persistence across sessions.
+ *      Imported lazily to avoid circular dependency (profile → redis → profile).
  *
  * @param {number|string} businessId
  * @param {string}        sessionId
@@ -320,6 +346,7 @@ async function pushTurnMemory(businessId, sessionId, turnData) {
 async function addRejectedEntity(businessId, sessionId, entityValue) {
   if (!entityValue || entityValue.length < 2) return;
   try {
+    // 1. Write to short-lived NLP context (for the current 10-min window)
     const current  = await getContext(businessId, sessionId);
     const existing = Array.isArray(current.rejectedEntities) ? current.rejectedEntities : [];
     if (!existing.includes(entityValue)) {
@@ -327,6 +354,8 @@ async function addRejectedEntity(businessId, sessionId, entityValue) {
         rejectedEntities: [...existing, entityValue].slice(-10),
       });
     }
+    // 2. Write to long-term profile (30-day TTL)
+    await profileAddRejected(businessId, sessionId, entityValue);
   } catch (err) {
     if (isRedisUp()) console.warn('[Redis] addRejectedEntity error:', err.message);
   }

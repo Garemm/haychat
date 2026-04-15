@@ -16,13 +16,46 @@
 jest.mock('ioredis', () => {
   const _store     = new Map();
   const _listStore = new Map();
+  const _hashStore = new Map();
+
+  // Shared negative-index resolver — mirrors real Redis semantics
+  function toJsStart(list, s) { return s < 0 ? Math.max(0, list.length + s) : s; }
+  function toJsEnd(list, e)   { return e < 0 ? list.length + e + 1          : e + 1; }
+
   const inst = {
     get:    jest.fn(async (key)             => _store.get(key) ?? null),
     setex:  jest.fn(async (key, _ttl, val)  => { _store.set(key, val); return 'OK'; }),
     rpush:  jest.fn(async (key, val)        => { const l = _listStore.get(key) || []; l.push(val); _listStore.set(key, l); return l.length; }),
-    lrange: jest.fn(async (key, s, e)       => { const l = _listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); }),
+    lrange: jest.fn(async (key, s, e)       => { const l = _listStore.get(key) || []; return l.slice(toJsStart(l, s), toJsEnd(l, e)); }),
     expire: jest.fn(async ()                => 1),
+    del:    jest.fn(async (key)             => { _store.delete(key); _listStore.delete(key); _hashStore.delete(key); return 1; }),
+    ltrim:  jest.fn(async (key, s, e)       => { const l = _listStore.get(key) || []; _listStore.set(key, l.slice(toJsStart(l, s), toJsEnd(l, e))); return 'OK'; }),
+    // Hash operations (used by userProfileService via addRejectedEntity)
+    hset:    jest.fn(async (key, ...args)   => { if (!_hashStore.has(key)) _hashStore.set(key, new Map()); const h = _hashStore.get(key); for (let i = 0; i < args.length; i += 2) h.set(args[i], args[i+1]); return args.length / 2; }),
+    hget:    jest.fn(async (key, field)     => _hashStore.get(key)?.get(field) ?? null),
+    hgetall: jest.fn(async (key)            => { const h = _hashStore.get(key); if (!h || h.size === 0) return null; const o = {}; for (const [k,v] of h) o[k]=v; return o; }),
+    hincrby: jest.fn(async (key, field, n)  => { if (!_hashStore.has(key)) _hashStore.set(key, new Map()); const h = _hashStore.get(key); const v = parseInt(h.get(field) ?? '0', 10) + n; h.set(field, String(v)); return v; }),
     on:     jest.fn(),
+    // Pipeline support: mirrors global mock — collects commands and executes
+    // them in order when exec() is called.
+    pipeline: jest.fn(function() {
+      const cmds = [];
+      const p = {
+        rpush:   (...a) => { cmds.push(() => inst.rpush(...a));   return p; },
+        expire:  (...a) => { cmds.push(() => inst.expire(...a));  return p; },
+        ltrim:   (...a) => { cmds.push(() => inst.ltrim(...a));   return p; },
+        hset:    (...a) => { cmds.push(() => inst.hset(...a));    return p; },
+        hincrby: (...a) => { cmds.push(() => inst.hincrby(...a)); return p; },
+        exec: jest.fn(async () => {
+          const res = [];
+          for (const fn of cmds) {
+            try { res.push([null, await fn()]); } catch (err) { res.push([err, null]); }
+          }
+          return res;
+        }),
+      };
+      return p;
+    }),
   };
   // Populate global refs so test code can access them after module load
   global.__scsStore     = _store;
@@ -139,14 +172,14 @@ describe('updateContext()', () => {
     const lastCall = mockRedisInstance.setex.mock.calls.find(([k]) => k === `ctx:${BIZ}:${id}`);
     expect(lastCall).toBeDefined();
     expect(lastCall[0]).toBe(`ctx:${BIZ}:${id}`);
-    expect(lastCall[1]).toBe(600); // TTL exacto
+    expect(lastCall[1]).toBe(1800); // TTL exacto (30 min)
   });
 
-  test('el TTL es exactamente 600 segundos', async () => {
+  test('el TTL es exactamente 1800 segundos (30 minutos)', async () => {
     const id = sid('ttl');
     await updateContext(BIZ, id, { lastIntent: 'precios' });
     const setexCall = mockRedisInstance.setex.mock.calls.find(([k]) => k === `ctx:${BIZ}:${id}`);
-    expect(setexCall[1]).toBe(600);
+    expect(setexCall[1]).toBe(1800);
   });
 
   test('hace MERGE con el contexto previo (no sobreescribe campos no enviados)', async () => {
@@ -242,7 +275,7 @@ describe('Fallback en memoria — flujo con Redis caído', () => {
     mockRedisInstance.get.mockImplementation(async (key) => store.get(key) ?? null);
     mockRedisInstance.setex.mockImplementation(async (key, _ttl, val) => { store.set(key, val); return 'OK'; });
     mockRedisInstance.rpush.mockImplementation(async (key, val) => { const l = listStore.get(key) || []; l.push(val); listStore.set(key, l); return l.length; });
-    mockRedisInstance.lrange.mockImplementation(async (key, s, e) => { const l = listStore.get(key) || []; return e === -1 ? l.slice(s) : l.slice(s, e + 1); });
+    mockRedisInstance.lrange.mockImplementation(async (key, s, e) => { const l = listStore.get(key) || []; const js = s < 0 ? Math.max(0, l.length + s) : s; const je = e < 0 ? l.length + e + 1 : e + 1; return l.slice(js, je); });
     mockRedisInstance.expire.mockImplementation(async () => 1);
   });
 

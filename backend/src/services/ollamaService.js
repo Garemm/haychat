@@ -38,6 +38,7 @@
 import { OLLAMA_URL as _OLLAMA_URL, OLLAMA_MODEL as _OLLAMA_MODEL, OLLAMA_TIMEOUT_MS as _OLLAMA_TIMEOUT_MS } from '../config/env.js';
 import BusinessModel from '../models/businessModel.js';
 import { getHistory } from './redisService.js';
+import { getProfile } from './userProfileService.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -176,19 +177,21 @@ function formatRagBlock(ragContext) {
 }
 
 /**
- * Builds the Ollama system prompt for the given business and RAG context.
+ * Builds the Ollama system prompt for the given business, RAG context, and user profile.
  *
  * The prompt tells the model:
- *   1. Who it is (business name + giro)
+ *   1. Who it is (business name + giro) and its personality
  *   2. Business description, contact and location (from DB profile)
  *   3. The specific data relevant to the user's query (from RAG filter)
- *   4. Behavioral instructions (Spanish only, no hallucination, concise)
+ *   4. Any known user preferences / name from the profile (personalization)
+ *   5. Behavioral instructions: natural, human-like, concise but not robotic
  *
  * @param {{ name: string, category: string, description: string|null, city: string|null, phone: string|null, email: string|null, webpage_link: string|null }} profile
  * @param {{ type: string, data: object[], summary: string }|null} ragContext
+ * @param {{ name: string|null, rejectedEntities: string[], visitCount: number }} userProfile
  * @returns {string}
  */
-function buildSystemPrompt(profile, ragContext) {
+function buildSystemPrompt(profile, ragContext, userProfile = {}) {
   const giro    = CATEGORY_LABELS[profile.category] ?? profile.category;
   const contact = [
     profile.phone        && `Teléfono: ${profile.phone}`,
@@ -199,14 +202,37 @@ function buildSystemPrompt(profile, ragContext) {
 
   const ragBlock = formatRagBlock(ragContext);
 
-  const desc = profile.description ? profile.description.slice(0, 80) : null;
+  const desc = profile.description ? profile.description.slice(0, 120) : null;
+
+  // Personalization block — only included when we know something about the user
+  const userName     = userProfile.name || null;
+  const rejected     = Array.isArray(userProfile.rejectedEntities) && userProfile.rejectedEntities.length > 0
+    ? userProfile.rejectedEntities.join(', ')
+    : null;
+  const isReturning  = (userProfile.visitCount || 0) > 3;
+
+  const personBlock = [
+    userName   ? `El usuario se llama ${userName}.` : null,
+    rejected   ? `El usuario no quiere: ${rejected}. Nunca sugieras estos.` : null,
+    isReturning ? `Es un cliente recurrente — puedes ser más familiar y cercano.` : null,
+  ].filter(Boolean).join(' ');
 
   const parts = [
-    `Asistente de "${profile.name}" (${giro}).`,
-    desc    ? `Info: ${desc}` : null,
+    `Eres el asistente de chat de "${profile.name}" (${giro}).`,
+    `Tu personalidad: amable, natural, cercano — como un empleado real que conoce el negocio.`,
+    desc    ? `Sobre el negocio: ${desc}` : null,
     contact ? `Contacto: ${contact}` : null,
     ragBlock ? `\n${ragBlock}` : null,
-    '\nReglas: responde en español, máx 2 oraciones, solo datos del contexto, sin inventar.',
+    personBlock ? `\nPerfil del usuario: ${personBlock}` : null,
+    [
+      '\nInstrucciones:',
+      '- Responde siempre en español, en tono conversacional y natural.',
+      '- Sé conciso pero completo. Usa 1-3 oraciones normalmente; más si el usuario pide detalle.',
+      '- Si el usuario mencionó algo antes en la conversación, puedes referenciarlo naturalmente.',
+      '- Usa ÚNICAMENTE la información del contexto proporcionado. No inventes precios ni datos.',
+      '- Si no sabes algo, dilo honestamente y ofrece alternativas.',
+      '- No repitas saludos si ya hablaste con el usuario en este chat.',
+    ].join('\n'),
   ];
 
   return parts.filter((l) => l !== null).join('\n');
@@ -240,9 +266,9 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
           { role: 'user',   content: userMessage  },
         ],
         options: {
-          temperature: 0.3,
-          num_predict: 80,
-          num_ctx:     1024,
+          temperature: 0.4,
+          num_predict: 200,  // was 80 — allow natural, complete sentences
+          num_ctx:     2048, // was 1024 — fits 6 turns + system prompt comfortably
         },
       }),
     });
@@ -270,9 +296,11 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
  * This is the main entry-point called from messagePipeline.handleAIFallback().
  * It will:
  *   1. Load the business profile from cache or DB.
- *   2. Build a context-aware system prompt (profile + RAG data).
- *   3. Call Ollama's /api/chat.
- *   4. Return the model's reply, or null if Ollama is unavailable.
+ *   2. Load the user profile (name, preferences) for personalization.
+ *   3. Build a context-aware system prompt (profile + RAG data + user preferences).
+ *   4. Inject the last 6 turns (12 messages) of history for coherent conversation.
+ *   5. Call Ollama's /api/chat.
+ *   6. Return the model's reply, or null if Ollama is unavailable.
  *
  * Returning null allows the pipeline to degrade gracefully to the mock fallback.
  *
@@ -280,6 +308,7 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
  * @param {{ type: string, data: object[], summary: string }|null} ragContext
  * @param {{ lastIntent: string|null, lastEntity: object|null }} sessionContext
  * @param {number}  businessId
+ * @param {string|null} sessionId
  * @returns {Promise<string|null>}  Model reply, or null on error/unavailability
  */
 async function generateOllamaResponse(userMessage, ragContext, sessionContext, businessId, sessionId = null) {
@@ -289,19 +318,32 @@ async function generateOllamaResponse(userMessage, ragContext, sessionContext, b
       console.warn(`[Ollama] No business profile found for id=${businessId}`);
       return null;
     }
-    const systemPrompt = buildSystemPrompt(profile, ragContext);
 
-    // Build last 2 turns from Redis history to give Ollama conversational context
+    // Load user profile for personalization (name, rejected entities, visit count)
+    let userProfile = { name: null, rejectedEntities: [], visitCount: 0 };
+    if (sessionId) {
+      try { userProfile = await getProfile(businessId, sessionId); } catch { /* non-fatal */ }
+    }
+
+    const systemPrompt = buildSystemPrompt(profile, ragContext, userProfile);
+
+    // Build last 6 turns (12 messages) from Redis history for conversational continuity.
+    // 6 turns is enough to avoid context drift without pushing the num_ctx limit.
     let historyMessages = [];
     if (sessionId) {
       try {
         const history = await getHistory(businessId, sessionId);
-        const recent = history.slice(-4); // last 4 entries = 2 turns
+        // Exclude the very last entry — it's the current user message being processed,
+        // already sent as the final 'user' role message in _callOllama.
+        const recent = history.slice(-13, -1); // up to 12 previous messages
         historyMessages = recent
-          .filter((m) => m?.sender && m?.text)
+          .filter((m) => m?.role && m?.text)
           .map((m) => ({
-            role: m.sender === 'user' ? 'user' : 'assistant',
-            content: m.text.slice(0, 200),
+            role: m.role === 'user' ? 'user' : 'assistant',
+            // Truncate at word boundary to avoid cutting mid-word
+            content: m.text.length > 500
+              ? m.text.slice(0, 500).replace(/\s\S*$/, '…')
+              : m.text,
           }));
       } catch { /* non-fatal */ }
     }

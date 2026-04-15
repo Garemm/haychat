@@ -26,6 +26,12 @@ const redis = new Redis({
   host: REDIS_HOST,
   port: REDIS_PORT,
   lazyConnect: true,
+  // Rule conn-timeouts: fail fast on unreachable Redis instead of hanging.
+  // connectTimeout: how long to wait for the TCP handshake.
+  // commandTimeout: how long a single command may take before it rejects.
+  connectTimeout:      3000,  // 3 s — fast failure detection
+  commandTimeout:      5000,  // 5 s — prevents slow commands from blocking
+  maxRetriesPerRequest: 2,    // retry transient errors twice, then surface them
   retryStrategy: (times) => {
     if (times > 3) return null; // stop retrying — chat continues without Redis
     return Math.min(times * 300, 2000);
