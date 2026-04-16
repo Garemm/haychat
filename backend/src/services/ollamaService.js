@@ -46,6 +46,13 @@ const OLLAMA_URL        = _OLLAMA_URL        || 'http://localhost:11434';
 const OLLAMA_MODEL      = _OLLAMA_MODEL      || 'llama3:latest';
 const OLLAMA_TIMEOUT_MS = _OLLAMA_TIMEOUT_MS || 30_000;
 
+/**
+ * Resolved model name — may differ from OLLAMA_MODEL if the configured name
+ * is a prefix (e.g. "llama3" resolves to "llama3.2:latest").
+ * Set by warmupOllama(); falls back to OLLAMA_MODEL until warmup completes.
+ */
+let _activeModel = OLLAMA_MODEL;
+
 // ─── Business profile cache ───────────────────────────────────────────────────
 
 /**
@@ -113,9 +120,10 @@ function formatRagBlock(ragContext) {
       for (const p of ragContext.data) {
         const price = p.price != null ? ` — $${Number(p.price).toFixed(2)}` : '';
         const cat   = p.category ? ` [${p.category}]` : '';
-        const desc  = p.description ? ` (${p.description})` : '';
-        const avail = p.available === false ? ' ⚠ no disponible' : '';
-        lines.push(`  • ${p.name}${cat}${price}${desc}${avail}`);
+        // Cap description inline as a safety net (ragFilter already limits, but just in case)
+        const rawDesc = p.description ? p.description.slice(0, 50) : null;
+        const desc  = rawDesc ? ` (${rawDesc})` : '';
+        lines.push(`  • ${p.name}${cat}${price}${desc}`);
       }
       break;
     }
@@ -202,6 +210,12 @@ function buildSystemPrompt(profile, ragContext, userProfile = {}) {
 
   const ragBlock = formatRagBlock(ragContext);
 
+  // If the RAG service detected an "alternative to X" request, add a directive
+  // so the model knows it should recommend DIFFERENT products, not X itself.
+  const altHint = ragContext?.alternativeTo
+    ? `\nNota: El usuario quiere alternativas a "${ragContext.alternativeTo}". Recomienda productos diferentes; no menciones "${ragContext.alternativeTo}" como opción.`
+    : null;
+
   const desc = profile.description ? profile.description.slice(0, 120) : null;
 
   // Personalization block — only included when we know something about the user
@@ -223,15 +237,14 @@ function buildSystemPrompt(profile, ragContext, userProfile = {}) {
     desc    ? `Sobre el negocio: ${desc}` : null,
     contact ? `Contacto: ${contact}` : null,
     ragBlock ? `\n${ragBlock}` : null,
+    altHint  ? altHint : null,
     personBlock ? `\nPerfil del usuario: ${personBlock}` : null,
     [
       '\nInstrucciones:',
-      '- Responde siempre en español, en tono conversacional y natural.',
-      '- Sé conciso pero completo. Usa 1-3 oraciones normalmente; más si el usuario pide detalle.',
-      '- Si el usuario mencionó algo antes en la conversación, puedes referenciarlo naturalmente.',
-      '- Usa ÚNICAMENTE la información del contexto proporcionado. No inventes precios ni datos.',
-      '- Si no sabes algo, dilo honestamente y ofrece alternativas.',
-      '- No repitas saludos si ya hablaste con el usuario en este chat.',
+      '- Responde en español, tono conversacional, 1-3 oraciones (más si piden detalle).',
+      '- Usa SOLO la información del contexto. No inventes precios ni datos.',
+      '- NO incluyas teléfono, email ni web a menos que el usuario los pida explícitamente.',
+      '- Si no sabes algo, dilo y ofrece alternativas. No repitas saludos.',
     ].join('\n'),
   ];
 
@@ -244,11 +257,18 @@ function buildSystemPrompt(profile, ragContext, userProfile = {}) {
  * Uses AbortController to enforce the configured timeout.
  * Throws on network error, non-2xx status, or empty model response.
  *
- * @param {string} systemPrompt
- * @param {string} userMessage
+ * When `onToken` is provided the request uses Ollama's NDJSON streaming mode:
+ * each token is forwarded to `onToken(token)` as it arrives, so the caller
+ * can push it to the client in real time.  The full assembled string is still
+ * returned when the stream is complete.
+ *
+ * @param {string}   systemPrompt
+ * @param {string}   userMessage
+ * @param {object[]} historyMessages
+ * @param {((token: string) => void) | null} onToken  — streaming callback
  * @returns {Promise<string>}
  */
-async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
+async function _callOllama(systemPrompt, userMessage, historyMessages = [], onToken = null) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
 
@@ -258,8 +278,8 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        model:  OLLAMA_MODEL,
-        stream: false,
+        model:  _activeModel,
+        stream: true,   // always stream — onToken forwards tokens; without it we just collect
         messages: [
           { role: 'system', content: systemPrompt },
           ...historyMessages,
@@ -267,8 +287,11 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
         ],
         options: {
           temperature: 0.4,
-          num_predict: 200,  // was 80 — allow natural, complete sentences
-          num_ctx:     2048, // was 1024 — fits 6 turns + system prompt comfortably
+          num_predict: 220,  // ~4-5 oraciones; más que 120 para no cortar respuestas
+          num_ctx:     1024, // ventana reducida → menos memoria procesada → mayor velocidad
+          num_thread:  0,    // 0 = auto-detect: usa todos los núcleos disponibles
+          top_k:       40,
+          top_p:       0.9,
         },
       }),
     });
@@ -277,12 +300,35 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
       throw new Error(`Ollama HTTP ${response.status}`);
     }
 
-    const json = await response.json();
-    const content = json?.message?.content;
-    if (!content || typeof content !== 'string' || content.trim() === '') {
-      throw new Error('Ollama returned empty content');
+    // Read the NDJSON stream line by line
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer      = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep last (possibly incomplete) line
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data  = JSON.parse(line);
+          const token = data?.message?.content;
+          if (token) {
+            fullContent += token;
+            onToken?.(token);
+          }
+        } catch { /* skip malformed NDJSON line */ }
+      }
     }
-    return content.trim();
+
+    if (!fullContent.trim()) throw new Error('Ollama returned empty content');
+    return fullContent.trim();
   } finally {
     clearTimeout(timer);
   }
@@ -311,44 +357,38 @@ async function _callOllama(systemPrompt, userMessage, historyMessages = []) {
  * @param {string|null} sessionId
  * @returns {Promise<string|null>}  Model reply, or null on error/unavailability
  */
-async function generateOllamaResponse(userMessage, ragContext, sessionContext, businessId, sessionId = null) {
+async function generateOllamaResponse(userMessage, ragContext, sessionContext, businessId, sessionId = null, onToken = null) {
   try {
-    const profile = await getBusinessProfile(businessId);
+    // Parallelize all three async lookups — they are independent of each other.
+    const [profile, userProfileRaw, historyRaw] = await Promise.all([
+      getBusinessProfile(businessId),
+      sessionId ? getProfile(businessId, sessionId).catch(() => null) : Promise.resolve(null),
+      sessionId ? getHistory(businessId, sessionId).catch(() => [])   : Promise.resolve([]),
+    ]);
+
     if (!profile) {
       console.warn(`[Ollama] No business profile found for id=${businessId}`);
       return null;
     }
 
-    // Load user profile for personalization (name, rejected entities, visit count)
-    let userProfile = { name: null, rejectedEntities: [], visitCount: 0 };
-    if (sessionId) {
-      try { userProfile = await getProfile(businessId, sessionId); } catch { /* non-fatal */ }
-    }
+    const userProfile = userProfileRaw ?? { name: null, rejectedEntities: [], visitCount: 0 };
 
     const systemPrompt = buildSystemPrompt(profile, ragContext, userProfile);
 
-    // Build last 6 turns (12 messages) from Redis history for conversational continuity.
-    // 6 turns is enough to avoid context drift without pushing the num_ctx limit.
-    let historyMessages = [];
-    if (sessionId) {
-      try {
-        const history = await getHistory(businessId, sessionId);
-        // Exclude the very last entry — it's the current user message being processed,
-        // already sent as the final 'user' role message in _callOllama.
-        const recent = history.slice(-13, -1); // up to 12 previous messages
-        historyMessages = recent
-          .filter((m) => m?.role && m?.text)
-          .map((m) => ({
-            role: m.role === 'user' ? 'user' : 'assistant',
-            // Truncate at word boundary to avoid cutting mid-word
-            content: m.text.length > 500
-              ? m.text.slice(0, 500).replace(/\s\S*$/, '…')
-              : m.text,
-          }));
-      } catch { /* non-fatal */ }
-    }
+    // Build last 3 turns (6 messages) from Redis history for conversational continuity.
+    // Reduced from 6 turns to keep context window small and improve response speed.
+    const recent = historyRaw.slice(-7, -1); // up to 6 previous messages (3 turns)
+    const historyMessages = recent
+      .filter((m) => m?.role && m?.text)
+      .map((m) => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        // Shorter truncation keeps context window lean for faster inference
+        content: m.text.length > 200
+          ? m.text.slice(0, 200).replace(/\s\S*$/, '…')
+          : m.text,
+      }));
 
-    const reply = await _callOllama(systemPrompt, userMessage, historyMessages);
+    const reply = await _callOllama(systemPrompt, userMessage, historyMessages, onToken);
     console.log(`[Ollama] Response for business=${businessId} (${reply.length} chars)`);
     return reply;
   } catch (err) {
@@ -361,36 +401,94 @@ async function generateOllamaResponse(userMessage, ragContext, sessionContext, b
 }
 
 /**
+ * Queries Ollama's /api/tags to list all locally pulled models.
+ * Returns an array of model name strings, or null on error.
+ *
+ * @returns {Promise<string[]|null>}
+ */
+async function listOllamaModels() {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return (json?.models ?? []).map((m) => m.name);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Warms up the Ollama model at server startup so the first real user request
  * doesn't hit the cold-start delay (model loading into VRAM/RAM).
+ *
+ * Uses a longer timeout (5 min) than regular requests because cold-start on
+ * CPU-only machines can take several minutes.
  *
  * Fires-and-forgets: errors are logged but never thrown.
  * Call once from server.js after the HTTP server starts.
  */
 async function warmupOllama() {
-  console.log(`[Ollama] Warming up model "${OLLAMA_MODEL}" at ${OLLAMA_URL} …`);
+  // ── 1. Verify Ollama is reachable and the model exists ───────────────────
+  const available = await listOllamaModels();
+  if (available === null) {
+    console.warn(`[Ollama] ⚠ Cannot reach Ollama at ${OLLAMA_URL} — service may not be running.`);
+    return;
+  }
+
+  if (available.length === 0) {
+    console.warn(`[Ollama] ⚠ No models found. Pull one with:  ollama pull llama3`);
+    return;
+  }
+
+  // Check for exact match first, then prefix match (e.g. "llama3" matches "llama3:latest")
+  const exactMatch  = available.includes(OLLAMA_MODEL);
+  const prefixMatch = !exactMatch && available.find(
+    (m) => m.startsWith(OLLAMA_MODEL.split(':')[0])
+  );
+
+  if (!exactMatch && !prefixMatch) {
+    console.warn(
+      `[Ollama] ⚠ Model "${OLLAMA_MODEL}" not found locally.\n` +
+      `         Available models: ${available.join(', ')}\n` +
+      `         Set OLLAMA_MODEL env var to one of the above, or run:  ollama pull ${OLLAMA_MODEL}`
+    );
+    return;
+  }
+
+  const resolvedModel = exactMatch ? OLLAMA_MODEL : prefixMatch;
+  if (!exactMatch) {
+    console.log(`[Ollama] Model "${OLLAMA_MODEL}" resolved to "${resolvedModel}"`);
+  }
+
+  // Store the resolved name so _callOllama uses the correct model tag
+  _activeModel = resolvedModel;
+
+  // ── 2. Warm up with a generous timeout (cold start can take minutes) ─────
+  const WARMUP_TIMEOUT = Math.max(OLLAMA_TIMEOUT_MS, 300_000); // at least 5 min
+  console.log(`[Ollama] Warming up model "${resolvedModel}" at ${OLLAMA_URL} (timeout ${WARMUP_TIMEOUT / 1000}s) …`);
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), WARMUP_TIMEOUT);
   try {
     const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: resolvedModel,
         stream: false,
         messages: [{ role: 'user', content: 'hola' }],
         options: { num_predict: 1 },
       }),
     });
     if (response.ok) {
-      console.log(`[Ollama] ✓ Model "${OLLAMA_MODEL}" ready`);
+      console.log(`[Ollama] ✓ Model "${resolvedModel}" ready`);
     } else {
       console.warn(`[Ollama] Warmup got HTTP ${response.status} — check model name`);
     }
   } catch (err) {
     const hint = err.name === 'AbortError' || err.message.includes('aborted')
-      ? 'timeout — model may need more time, or Ollama is not running'
+      ? `timeout after ${WARMUP_TIMEOUT / 1000}s — model is still loading (large models can take several minutes on CPU)`
       : err.message;
     console.warn('[Ollama] Warmup failed:', hint);
   } finally {
@@ -404,5 +502,6 @@ export {
   formatRagBlock,
   invalidateProfile,
   warmupOllama,
+  listOllamaModels,
 };
 

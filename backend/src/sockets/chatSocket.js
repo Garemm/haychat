@@ -223,28 +223,52 @@ const initSocket = (httpServer) => {
         // 3. Process through NLP pipeline
         // Signal to all room members that the bot is working on a response
         io.to(roomId).emit('user_typing', { sender: 'Bot' });
+
+        // Prepare bot message ID upfront so streaming events share the same ID
+        // as the final receive_message (or bot_stream_end) event.
+        const botMsgId = randomUUID();
+        let streamingStarted = false;
+
+        // onToken fires for every AI-generated token — forward each one to the room.
+        // The first token also emits bot_stream_start so the frontend can create
+        // the message bubble before any text arrives.
+        const onToken = (token) => {
+          if (!streamingStarted) {
+            streamingStarted = true;
+            io.to(roomId).emit('bot_stream_start', { roomId, messageId: botMsgId, sender: 'Bot' });
+          }
+          io.to(roomId).emit('bot_stream_token', { roomId, messageId: botMsgId, token });
+        };
+
         let replyText, pipelineDecision;
         try {
-          ({ replyText, decision: pipelineDecision } = await processMessage({ text, sessionId, businessId }));
+          ({ replyText, decision: pipelineDecision } = await processMessage({ text, sessionId, businessId, onToken }));
         } finally {
           io.to(roomId).emit('user_stop_typing', { sender: 'Bot' });
         }
 
         const botTimestamp = new Date().toISOString();
 
-        // 4. Build and emit bot response
-        const botMsg = {
-          id:        randomUUID(),
-          roomId,
-          sender:    'Bot',
-          text:      replyText,
-          timestamp: botTimestamp,
-        };
-        io.to(roomId).emit('receive_message', botMsg);
+        // 4. Emit bot response
+        if (streamingStarted) {
+          // Streaming path: finalise the in-progress bubble with the complete text.
+          // bot_stream_end replaces receive_message so the frontend doesn't add a duplicate.
+          io.to(roomId).emit('bot_stream_end', { roomId, messageId: botMsgId, text: replyText, timestamp: botTimestamp });
+        } else {
+          // Deterministic / non-AI path: emit a normal receive_message (instant).
+          const botMsg = {
+            id:        botMsgId,
+            roomId,
+            sender:    'Bot',
+            text:      replyText,
+            timestamp: botTimestamp,
+          };
+          io.to(roomId).emit('receive_message', botMsg);
+        }
 
         // 5. Persist bot response to Redis history (include id for React key)
         await redisSaveMessage(businessId, sessionId, {
-          id:        botMsg.id,
+          id:        botMsgId,
           role:      'assistant',
           sender:    'Bot',
           text:      replyText,

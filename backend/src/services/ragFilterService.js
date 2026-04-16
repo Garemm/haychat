@@ -103,54 +103,92 @@ async function filterRelevantData(normalizedText, businessId, intentResult, enti
   try {
     switch (aiType) {
       case 'recommendation': {
-        // Prefer explicit entity from message over stale context entity.
-        const explicitEntity = entity?.value || null;
-        const catHint = explicitEntity || context?.lastEntity?.value;
+        // Words that describe the *request type*, not a product category.
+        // If the entity extractor picked one of these, it's useless as a search term.
+        const META_WORDS = new Set([
+          'recomendacion', 'recomendaciones', 'sugerencia', 'sugerencias',
+          'opcion', 'opciones', 'algo', 'producto', 'productos', 'articulo', 'articulos',
+        ]);
 
-        // If message contains "con X" (attribute filter) AND we have a product type,
-        // use compound search so Ollama only sees the relevant filtered products.
-        // e.g. "recomiéndame una hamburguesa con picante" → fetch hamburguesas con picante.
+        const rawEntity      = entity?.value || null;
+        const explicitEntity = rawEntity && !META_WORDS.has(rawEntity) ? rawEntity : null;
+        const contextEntity  = context?.lastEntity?.value && !META_WORDS.has(context.lastEntity.value)
+          ? context.lastEntity.value
+          : null;
+
+        // Detect "alternative to X" patterns: "en lugar de", "en vez de", "alternativa a",
+        // "sustituto de", "algo similar a", etc. When detected, we want OTHER products, not X.
+        const ALT_RE = /\b(?:en\s+lugar\s+de|en\s+vez\s+de|alternativa\s+(?:a|al|de)|sustituto\s+(?:a|de)|similar\s+a|parecido\s+a|cambio\s+de|distinto\s+a|diferente\s+a)\b/;
+        const isAlternativeRequest = ALT_RE.test(normalizedText);
+
+        // If entity is a meta-word, extract the first meaningful noun from the text.
+        // e.g. "dame recomendacion de herramientas para armar mesa" → "herramientas"
+        let textHint = null;
+        if (!explicitEntity) {
+          const NOISE = new Set([
+            'dame', 'deme', 'quiero', 'quisiera', 'necesito', 'busco',
+            'de', 'del', 'para', 'una', 'uno', 'unos', 'unas', 'que', 'me', 'con', 'los',
+            'las', 'algunos', 'algunas', 'hay', 'armar', 'hacer', 'comprar', 'usar',
+            'lugar', 'vez', 'cambio', 'alternativa', 'sustituto',
+            ...META_WORDS,
+          ]);
+          const words = normalizedText.split(/\s+/).filter((w) => w.length > 3 && !NOISE.has(w));
+          textHint = words[0] || null;
+        }
+
+        const catHint = explicitEntity || contextEntity || textHint;
+
+        const REC_MAX = 8; // smaller than global MAX_ITEMS → shorter prompt → faster inference
         let rows;
-        const CON_IN_MSG = /\bcon\s+(?<attr>[\wñ][\wñ\s]{1,30}?)(?:\s*\?)?$/.exec(normalizedText);
-        const attrHint = CON_IN_MSG?.groups?.attr?.trim();
-        if (catHint && attrHint) {
-          // Use base noun of catHint (first non-preposition word) so "hamburguesa doble"
-          // broadens to "hamburguesa" when filtering by attribute.
-          const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
-          const baseNoun = catHint.split(/\s+/).find((w) => !PREP_ART.has(w)) || catHint.split(/\s+/)[0];
-          const compound = await searchByCompoundQuery(
-            { entity: baseNoun, attribute: attrHint, fullPhrase: `${baseNoun} con ${attrHint}` },
-            businessId
-          );
-          if (compound.rows.length > 0) {
-            rows = compound.rows.slice(0, MAX_ITEMS);
+
+        if (isAlternativeRequest && catHint) {
+          // User wants alternatives to a specific product (e.g. "en lugar de tornillos").
+          // Fetch all products and exclude the reference product so Ollama can reason
+          // about what else could serve the same purpose.
+          const allResult = await BusinessModel.getProductos(businessId);
+          const refNorm   = normalize(catHint);
+          rows = allResult
+            .filter((p) => !normalize(p.name).includes(refNorm))
+            .slice(0, REC_MAX);
+          // If exclusion left nothing, just return all (better than empty)
+          if (rows.length === 0) rows = allResult.slice(0, REC_MAX);
+        } else if (catHint) {
+          // If message contains "con X" (attribute filter) AND we have a product type,
+          // use compound search so Ollama only sees the relevant filtered products.
+          const CON_IN_MSG = /\bcon\s+(?<attr>[\wñ][\wñ\s]{1,30}?)(?:\s*\?)?$/.exec(normalizedText);
+          const attrHint = CON_IN_MSG?.groups?.attr?.trim();
+          if (attrHint) {
+            const PREP_ART = new Set(['de', 'del', 'con', 'sin', 'al', 'a', 'en', 'el', 'la', 'los', 'las', 'un', 'una']);
+            const baseNoun = catHint.split(/\s+/).find((w) => !PREP_ART.has(w)) || catHint.split(/\s+/)[0];
+            const compound = await searchByCompoundQuery(
+              { entity: baseNoun, attribute: attrHint, fullPhrase: `${baseNoun} con ${attrHint}` },
+              businessId
+            );
+            if (compound.rows.length > 0) rows = compound.rows.slice(0, REC_MAX);
+          }
+          if (!rows) {
+            const catBase = catHint.replace(/\s+con\s+.+$/, '').trim() || catHint;
+            rows = (await queryProducts(catBase, businessId)).slice(0, REC_MAX);
+            if (rows.length === 0 && /\s/.test(catBase)) {
+              const firstNoun = catBase.split(/\s+/)[0];
+              rows = (await queryProducts(firstNoun, businessId)).slice(0, REC_MAX);
+            }
           }
         }
-        if (!rows && catHint) {
-          // Strip any " con X" compound previously stored as lastEntity value
-          // so a plain product search uses just the base noun (e.g. "hamburguesa").
-          const catBase = catHint.replace(/\s+con\s+.+$/, '').trim() || catHint;
-          rows = (await queryProducts(catBase, businessId)).slice(0, MAX_ITEMS);
-          // Retry with just the first word when the catBase is a multi-word phrase
-          // that includes an adjective qualifier (e.g. "hamburguesa picante").
-          // This prevents falling all the way to all-products when the DB has the
-          // base product but not under the exact qualified name.
-          if (rows.length === 0 && /\s/.test(catBase)) {
-            const firstNoun = catBase.split(/\s+/)[0];
-            rows = (await queryProducts(firstNoun, businessId)).slice(0, MAX_ITEMS);
-          }
-        }
+
         if (!rows || rows.length === 0) {
           const allResult = await BusinessModel.getProductos(businessId);
-          rows = allResult.slice(0, MAX_ITEMS);
+          rows = allResult.slice(0, REC_MAX);
         }
+
         return {
           type: 'products',
-          data: _compactProducts(rows),
+          data: _compactProducts(rows, { onlyAvailable: true, maxDescLen: 60 }),
           summary: `${rows.length} productos relevantes para recomendación${
-            attrHint ? ` (filtrado por "con ${attrHint}")` : ''
+            isAlternativeRequest && catHint ? ` (alternativas a "${catHint}")` : ''
           }`,
           total: rows.length,
+          alternativeTo: isAlternativeRequest ? catHint : null,
         };
       }
 
@@ -255,15 +293,17 @@ async function filterRelevantData(normalizedText, businessId, intentResult, enti
 /**
  * Strips heavy fields from product rows to minimize token usage.
  * @param {object[]} rows
+ * @param {{ onlyAvailable?: boolean, maxDescLen?: number }} opts
  * @returns {object[]}
  */
-function _compactProducts(rows) {
-  return rows.map((r) => ({
+function _compactProducts(rows, { onlyAvailable = false, maxDescLen = 60 } = {}) {
+  const filtered = onlyAvailable ? rows.filter((r) => r.is_available !== false) : rows;
+  return filtered.map((r) => ({
     name: r.name,
     price: r.price,
     category: r.category ?? null,
     available: r.is_available !== false,
-    description: r.description ?? null,
+    description: r.description ? r.description.slice(0, maxDescLen) : null,
   }));
 }
 

@@ -48,6 +48,32 @@ export const ChatProvider = ({ children, businessId, businessName = '', aceptoPe
     setMessages(history.map((m) => ({ ...m, isNew: false })));
   }, []);
 
+  /** Called when the backend starts streaming a bot response. Creates an empty placeholder bubble. */
+  const addStreamMessage = useCallback(({ messageId, sender, timestamp }) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: messageId, sender, text: '', timestamp: timestamp ?? new Date().toISOString(), isNew: true, streaming: true },
+    ]);
+  }, []);
+
+  /** Appends a token to the streaming bubble identified by messageId. */
+  const appendStreamToken = useCallback(({ messageId, token }) => {
+    setMessages((prev) =>
+      prev.map((m) => m.id === messageId ? { ...m, text: m.text + token } : m)
+    );
+  }, []);
+
+  /** Finalises the streaming bubble: replaces text with full reply and clears streaming flag. */
+  const finalizeStreamMessage = useCallback(({ messageId, text, timestamp }) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, text, timestamp: timestamp ?? m.timestamp, streaming: false }
+          : m
+      )
+    );
+  }, []);
+
   const addTypingUser = useCallback((sender) => {
     setTypingUsers((prev) => (prev.includes(sender) ? prev : [...prev, sender]));
   }, []);
@@ -149,6 +175,9 @@ export const ChatProvider = ({ children, businessId, businessName = '', aceptoPe
         setUsername,
         addMessage,
         setHistory,
+        addStreamMessage,
+        appendStreamToken,
+        finalizeStreamMessage,
         addTypingUser,
         removeTypingUser,
         toggleVoice,

@@ -33,6 +33,9 @@ const useSocket = () => {
     pedidoForm,
     addMessage,
     setHistory,
+    addStreamMessage,
+    appendStreamToken,
+    finalizeStreamMessage,
     addTypingUser,
     removeTypingUser,
     setPedidoForm,
@@ -72,6 +75,25 @@ const useSocket = () => {
 
     socket.on('message_history', setHistory);
     socket.on('receive_message', addMessage);
+
+    // ── Streaming events ──────────────────────────────────────────────────────
+    // bot_stream_start → create a streaming bubble in the message list
+    // bot_stream_token → append one token to that bubble
+    // bot_stream_end   → finalise bubble with the complete text
+    const onStreamStart = ({ messageId, sender, timestamp }) => {
+      addStreamMessage({ messageId, sender, timestamp });
+    };
+    const onStreamToken = ({ messageId, token }) => {
+      appendStreamToken({ messageId, token });
+    };
+    const onStreamEnd = ({ messageId, text, timestamp }) => {
+      finalizeStreamMessage({ messageId, text, timestamp });
+    };
+
+    socket.on('bot_stream_start', onStreamStart);
+    socket.on('bot_stream_token', onStreamToken);
+    socket.on('bot_stream_end',   onStreamEnd);
+
     socket.on('user_typing', ({ sender }) => {
       if (sender !== username) addTypingUser(sender);
     });
@@ -130,6 +152,9 @@ const useSocket = () => {
       socket.io.off('reconnect', onReconnect);
       socket.off('message_history', setHistory);
       socket.off('receive_message', addMessage);
+      socket.off('bot_stream_start', onStreamStart);
+      socket.off('bot_stream_token', onStreamToken);
+      socket.off('bot_stream_end',   onStreamEnd);
       socket.off('user_typing');
       socket.off('user_stop_typing');
       socket.off('mostrar_formulario_pedido', onMostrarFormulario);
@@ -138,7 +163,7 @@ const useSocket = () => {
       socket.off('pedido_actualizado',       onPedidoActualizado);
       socket.off('pedido_error',             onPedidoError);
     };
-  }, [roomId, username, addMessage, setHistory, addTypingUser, removeTypingUser, setPedidoForm, clearPedidoForm, setPedidoSubmitted, updatePedidoReceipt]);
+  }, [roomId, username, addMessage, setHistory, addStreamMessage, appendStreamToken, finalizeStreamMessage, addTypingUser, removeTypingUser, setPedidoForm, clearPedidoForm, setPedidoSubmitted, updatePedidoReceipt]);
 
   /**
    * Envía el mensaje del usuario incluyendo el sessionId persistente.

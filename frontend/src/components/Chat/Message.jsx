@@ -23,12 +23,24 @@ const Message = ({ message, currentUser }) => {
   const isMine = message.role
     ? message.role === 'user'
     : message.sender === currentUser;
-  const shouldType  = !isMine && message.isNew === true;
+
+  // Streaming messages (arriving token by token) must NOT use the typewriter animation —
+  // the animation captures message.text at mount time and would only play the first token.
+  // Non-streaming new bot messages still get the typewriter effect.
+  const isStreaming = message.streaming === true;
+  const shouldType  = !isMine && message.isNew === true && !isStreaming;
 
   const [displayed, setDisplayed] = useState(shouldType ? '' : message.text);
   const [isTyping,  setIsTyping]  = useState(shouldType);
   const intervalRef = useRef(null);
   const startRef    = useRef(null);
+
+  // Sync displayed text for streaming messages as new tokens arrive
+  useEffect(() => {
+    if (isStreaming) {
+      setDisplayed(message.text);
+    }
+  }, [isStreaming, message.text]);
 
   useEffect(() => {
     if (!shouldType) return;
@@ -72,9 +84,9 @@ const Message = ({ message, currentUser }) => {
         {!isMine && <span className="message__sender">{message.sender}</span>}
         <p className="message__text">
           {displayed}
-          {isTyping && <span className="message__cursor" aria-hidden="true" />}
+          {(isTyping || isStreaming) && <span className="message__cursor" aria-hidden="true" />}
         </p>
-        {!isTyping && (
+        {!isTyping && !isStreaming && (
           <span className="message__time">{time}</span>
         )}
       </div>

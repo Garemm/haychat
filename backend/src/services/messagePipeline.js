@@ -1546,7 +1546,7 @@ async function executeDecision(decision, originalText, normalizedText, businessI
  * @param {{ lastIntent: string|null, lastEntity: object }}        context
  * @returns {Promise<{ text: string, aiUsed: boolean, ragContext: object|null }>}
  */
-async function handleAIFallback(originalText, normalizedText, businessId, intentResult, entityResult, context, sessionId = null) {
+async function handleAIFallback(originalText, normalizedText, businessId, intentResult, entityResult, context, sessionId = null, onToken = null) {
   // Step 1: keyword responses (greetings, etc.) — only for short/standalone messages.
   // A message like "hola que me recomiendas" contains "hola" as a prefix but is really
   // an AI request, so we skip the keyword shortcut once the message exceeds 3 words.
@@ -1586,6 +1586,7 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
     entityResult,
     context,
     sessionId,
+    onToken,
   });
 
   return { text: gateResult.text, aiUsed: gateResult.aiUsed, ragContext: gateResult.ragContext };
@@ -1599,7 +1600,7 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
  * @param {{ text: string, sessionId: string, businessId: number }} params
  * @returns {Promise<{ replyText: string, decision: PipelineDecision, logs: object }>}
  */
-async function processMessage({ text, sessionId, businessId }) {
+async function processMessage({ text, sessionId, businessId, onToken = null }) {
   // 1. Preprocess: normalize + expand abbreviations + correct typos
   const normalizedText = preprocessMessage(text);
 
@@ -1734,7 +1735,7 @@ async function processMessage({ text, sessionId, businessId }) {
   if (decision.strategy === 'ai') {
     // Hybrid AI path: decision engine + RAG filter + simulated OpenAI
     const aiResult = await handleAIFallback(
-      text, primaryText, businessId, intentResult, entityResult, context, sessionId
+      text, primaryText, businessId, intentResult, entityResult, context, sessionId, onToken
     );
     replyText = aiResult.text;
     aiUsed = aiResult.aiUsed;
