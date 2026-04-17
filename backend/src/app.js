@@ -1,36 +1,49 @@
-/**
- * src/app.js
- *
- * Express application factory.
- * Separated from server.js so it can be imported in tests without starting
- * the HTTP server or Socket.io connection.
- */
-
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { CLIENT_URL } from './config/env.js';
 import routes from './routes/index.js';
 import errorHandler from './middlewares/errorHandler.js';
 import requestLogger from './middlewares/requestLogger.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
-// ── Security & Parsing ────────────────────────────────────────────────────────
-// CLIENT_URL is already an array (parsed in env.js)
+// ── Middlewares ──────────────────────────────────────────────────────────────
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
 app.use(express.json());
-
-// ── Request Logging ───────────────────────────────────────────────────────────
 app.use(requestLogger);
 
-// ── API Routes ────────────────────────────────────────────────────────────────
+// ── API ──────────────────────────────────────────────────────────────────────
 app.use('/api', routes);
 
-// ── Health Check (useful for Docker, Railway, Render, etc.) ──────────────────
+// ── Health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-// ── Centralized Error Handler (must be last) ─────────────────────────────────
+// ── Static Frontend (SOLO SI ESTÁ ACTIVADO) ─────────────────────────────────
+if (process.env.SERVE_FRONTEND === 'true') {
+  const publicPath = path.join(__dirname, '../public/chatFrontend');
+
+  // servir frontend bajo /chat
+  app.use('/chat', express.static(publicPath));
+
+  // fallback React Router
+  app.get('/chat/*', (req, res) => {
+    res.sendFile(path.join(publicPath, 'index.html'));
+  });
+
+  // redirect root → /chat
+  app.get('/', (req, res) => {
+    res.redirect('/chat');
+  });
+}
+
+// ── Error Handler ───────────────────────────────────────────────────────────
 app.use(errorHandler);
 
 export default app;
