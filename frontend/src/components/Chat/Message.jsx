@@ -85,6 +85,19 @@ const Message = ({ message, currentUser }) => {
         <p className="message__text">
           {displayed}
           {(isTyping || isStreaming) && <span className="message__cursor" aria-hidden="true" />}
+          {!isTyping && !isStreaming && message.meta?.links && (
+            message.meta.links.map((l, idx) => (
+              <a
+                key={idx}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#0563c1', textDecoration: 'underline', marginLeft: 8 }}
+              >
+                {l.text}
+              </a>
+            ))
+          )}
         </p>
         {!isTyping && !isStreaming && (
           <span className="message__time">{time}</span>

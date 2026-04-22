@@ -86,8 +86,8 @@ const useSocket = () => {
     const onStreamToken = ({ messageId, token }) => {
       appendStreamToken({ messageId, token });
     };
-    const onStreamEnd = ({ messageId, text, timestamp }) => {
-      finalizeStreamMessage({ messageId, text, timestamp });
+    const onStreamEnd = ({ messageId, text, timestamp, meta }) => {
+      finalizeStreamMessage({ messageId, text, timestamp, meta });
     };
 
     socket.on('bot_stream_start', onStreamStart);

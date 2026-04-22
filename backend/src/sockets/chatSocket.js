@@ -253,7 +253,9 @@ const initSocket = (httpServer) => {
         if (streamingStarted) {
           // Streaming path: finalise the in-progress bubble with the complete text.
           // bot_stream_end replaces receive_message so the frontend doesn't add a duplicate.
-          io.to(roomId).emit('bot_stream_end', { roomId, messageId: botMsgId, text: replyText, timestamp: botTimestamp });
+          const endPayload = { roomId, messageId: botMsgId, text: replyText, timestamp: botTimestamp };
+          if (pipelineDecision?._replyMeta) endPayload.meta = pipelineDecision._replyMeta;
+          io.to(roomId).emit('bot_stream_end', endPayload);
         } else {
           // Deterministic / non-AI path: emit a normal receive_message (instant).
           const botMsg = {
@@ -263,6 +265,7 @@ const initSocket = (httpServer) => {
             text:      replyText,
             timestamp: botTimestamp,
           };
+          if (pipelineDecision?._replyMeta) botMsg.meta = pipelineDecision._replyMeta;
           io.to(roomId).emit('receive_message', botMsg);
         }
 
@@ -272,6 +275,7 @@ const initSocket = (httpServer) => {
           role:      'assistant',
           sender:    'Bot',
           text:      replyText,
+          meta:      pipelineDecision?._replyMeta ?? null,
           timestamp: botTimestamp,
         });
 

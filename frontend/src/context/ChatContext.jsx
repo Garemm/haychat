@@ -64,11 +64,11 @@ export const ChatProvider = ({ children, businessId, businessName = '', aceptoPe
   }, []);
 
   /** Finalises the streaming bubble: replaces text with full reply and clears streaming flag. */
-  const finalizeStreamMessage = useCallback(({ messageId, text, timestamp }) => {
+  const finalizeStreamMessage = useCallback(({ messageId, text, timestamp, meta = null }) => {
     setMessages((prev) =>
       prev.map((m) =>
         m.id === messageId
-          ? { ...m, text, timestamp: timestamp ?? m.timestamp, streaming: false }
+          ? { ...m, text, timestamp: timestamp ?? m.timestamp, streaming: false, meta: meta ?? m.meta ?? null }
           : m
       )
     );

@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">96.82% </span>
+                <span class="strong">96.66% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>61/63</span>
+                <span class='fraction'>58/60</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">98.24% </span>
+                <span class="strong">98.14% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>56/57</span>
+                <span class='fraction'>53/54</span>
             </div>
         
             
@@ -409,7 +409,13 @@
 <a name='L344'></a><a href='#L344'>344</a>
 <a name='L345'></a><a href='#L345'>345</a>
 <a name='L346'></a><a href='#L346'>346</a>
-<a name='L347'></a><a href='#L347'>347</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L347'></a><a href='#L347'>347</a>
+<a name='L348'></a><a href='#L348'>348</a>
+<a name='L349'></a><a href='#L349'>349</a>
+<a name='L350'></a><a href='#L350'>350</a>
+<a name='L351'></a><a href='#L351'>351</a>
+<a name='L352'></a><a href='#L352'>352</a>
+<a name='L353'></a><a href='#L353'>353</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -454,8 +460,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
@@ -512,8 +516,14 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">28x</span>
-<span class="cline-any cline-yes">46x</span>
+<span class="cline-any cline-yes">45x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">28x</span>
@@ -749,15 +759,15 @@
 <span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">'use strict';
-&nbsp;
-/**
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
  * src/services/nlpEntityExtractor.js
  *
  * NLP ENTITY EXTRACTOR — Specific product-query detection with entity
@@ -800,8 +810,8 @@
  *      the same extractAndRespond(message) → string|null contract.
  */
 &nbsp;
-const nlp = require('compromise');
-const db  = require('../config/database');
+import nlp from 'compromise';
+import db from '../config/database.js';
 &nbsp;
 // Default business — change per conversation once multi-tenant is implemented
 const DEFAULT_BUSINESS_ID = 1;
@@ -848,6 +858,12 @@ const ENTITY_BLOCKLIST = new Set([
   'catalogo', 'catálogo', 'lista', 'menu', 'menú',
   'servicio', 'servicios', 'oferta', 'ofertas',
   'algo', 'todo', 'nada', 'mucho', 'poco',
+  // Palabras interrogativas — nunca son nombres de producto.
+  // Previenen que el fallback NLP extraiga frases como "cuanto cuesta" cuando
+  // no hay un producto específico (ej: "¿y cuánto cuesta?" sin contexto).
+  // Los patrones regex SÍ manejan "cuánto cuesta la hamburguesa" correctamente
+  // porque captoran el nombre del producto DESPUÉS de la palabra interrogativa.
+  'cuanto', 'cuanta', 'cuantos', 'cuantas',
 ]);
 &nbsp;
 /**
@@ -1004,10 +1020,10 @@ async function queryProductByEntity(entity, businessId) {
      FROM products p
      LEFT JOIN product_inventory pi ON p.id = pi.product_id
      WHERE p.business_id = $1
-       AND p.name ILIKE $2
+       AND translate(LOWER(p.name), '\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc', 'aeiouu') ILIKE $2
      ORDER BY
        -- Exact (normalized) match first, then partial
-       CASE WHEN LOWER(p.name) = LOWER($3) THEN 0 ELSE 1 END,
+       CASE WHEN translate(LOWER(p.name), '\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc', 'aeiouu') = $3 THEN 0 ELSE 1 END,
        p.name ASC
      LIMIT 5`,
     [businessId, `%${entity}%`, entity]
@@ -1095,11 +1111,13 @@ async function extractAndRespond(message, businessId = DEFAULT_BUSINESS_ID) {
   return formatProductResponse(entity, products);
 }
 &nbsp;
-module.exports = {
+export {
   extractAndRespond,
-  // Exported for testing or reuse in other services
+  // Exported for reuse: context-aware pipeline in chatSocket.js
   normalize,
   extractProductEntity,
+  queryProductByEntity,
+  formatProductResponse,
 };
 &nbsp;</pre></td></tr></table></pre>
 
@@ -1108,7 +1126,7 @@ module.exports = {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-30T06:45:22.104Z
+                at 2026-04-17T02:11:03.082Z
             </div>
         <script src="../prettify.js"></script>
         <script>

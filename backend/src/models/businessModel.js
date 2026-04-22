@@ -224,7 +224,8 @@ const BusinessModel = {
          name,
          description,
          city,
-         webpage_link
+         webpage_link,
+         google_maps_url
        FROM businesses
        WHERE id = $1`,
       [businessId]
