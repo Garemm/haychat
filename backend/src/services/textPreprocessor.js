@@ -293,7 +293,9 @@ function buildValidSet(products = [], categories = []) {
  */
 const CORRECT_WORDS = new Set([
   'tienen', 'tienes', 'tiene', 'tenemos',
+  'cuenta', 'cuentan', 'cuentas',
   'cuantas', 'cuantos', 'cuanto', 'cuanta',
+  'cuesta', 'cuestan',
   'donde', 'cuando', 'como', 'cual', 'cuales', 'quien',
   'horario', 'horarios', 'hora', 'horas',
   'precio', 'precios', 'costo',

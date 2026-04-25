@@ -465,6 +465,65 @@ function extractFollowUpEntity(normalizedText, lastEntity) {
   return null;
 }
 
+// ─── Product attribute inclusion check ──────────────────────────────────────
+
+/**
+ * Intent-domain words that, when appearing as the queried attribute, signal a
+ * known business-info intent rather than a product attribute.
+ * Prevents "la tienda tiene promociones?" from triggering product_attr_check.
+ */
+const INTENT_DOMAIN_ATTR_WORDS = new Set([
+  'promociones', 'descuentos', 'descuento', 'promocion',
+  'horario', 'horarios', 'precio', 'precios', 'costo', 'costos',
+  'ubicacion', 'ubicaciones', 'direccion',
+  'contacto', 'telefono', 'correo',
+  'servicios', 'servicio',
+  'catalogo', 'menu', 'carta',
+]);
+
+/**
+ * Detects yes/no attribute-inclusion patterns:
+ *   "la pizza hawaiana incluye jamón?"    → { product: "pizza hawaiana", askedAttribute: "jamon" }
+ *   "sopa de tortillas lleva crema?"      → { product: "sopa de tortillas", askedAttribute: "crema" }
+ *   "Michelada tiene limón?"              → { product: "michelada", askedAttribute: "limon" }
+ *
+ * NOT matched:
+ *   "que incluye la pizza hawaiana?"      → open-ended description (starts with "que")
+ *   "algo con jamón?"                     → attribute search (has "algo")
+ *   "tiene promociones?"                  → intent-domain attr blocked
+ *
+ * @param {string} normalizedText  Already preprocessed text
+ * @returns {{ product: string, askedAttribute: string }|null}
+ */
+function detectProductAttributeCheck(normalizedText) {
+  // Skip open-ended question starters ("que incluye X?" = "what does X have?")
+  if (/^(?:que|cual|cuales|cuando|donde|como)\s/.test(normalizedText)) return null;
+  // Skip generic attribute searches ("algo con X", "hay algo con X")
+  if (/\balgo\b/.test(normalizedText)) return null;
+
+  // Pattern: [optional article] [product (1+ words)] [verb] [optional article] [attribute (1+ words)] [?]
+  const ARTICLE    = '(?:el\\s+|la\\s+|los\\s+|las\\s+|un\\s+|una\\s+)?';
+  const VERB_GROUP = '(?:incluye[n]?|contiene[n]?|trae[n]?|lleva[n]?|tiene[n]?)';
+  const WORD_SEQ   = '[\\wñ]+(?:\\s+[\\wñ]+)*?';
+  const WORD_SEQ_E = '[\\wñ]+(?:\\s+[\\wñ]+)*';
+  const pattern = new RegExp(
+    `^${ARTICLE}(?<product>${WORD_SEQ})\\s+${VERB_GROUP}\\s+${ARTICLE}(?<attr>${WORD_SEQ_E})\\s*\\??$`
+  );
+
+  const m = normalizedText.match(pattern);
+  if (!m?.groups?.product || !m?.groups?.attr) return null;
+
+  const product = m.groups.product.trim();
+  const attr    = m.groups.attr.trim();
+
+  if (product.length < 2 || attr.length < 2) return null;
+
+  // Don't trigger when the attribute is an intent-domain keyword
+  if (INTENT_DOMAIN_ATTR_WORDS.has(attr)) return null;
+
+  return { product, askedAttribute: attr };
+}
+
 // ─── Decision engine ──────────────────────────────────────────────────────────
 
 /**
@@ -665,6 +724,22 @@ function decide(intentResult, entityResult, context, normalizedText) {
       entity: { type: null, value: null },
       usedContext: false,
       reason: `standalone intent "${intentResult.intent}" score=${intentResult.score}`,
+    };
+  }
+
+  // Rule 1.6: Product attribute inclusion check — "does [product] include/have [attr]?"
+  // Intercepts yes/no questions like "la pizza hawaiana incluye jamón?" BEFORE the
+  // attribute entity path (Rule 1.7) misroutes them as attribute searches, and BEFORE
+  // Rule 2 treats the ingredient as a product name to look up.
+  // Placed after AI prescreen and high-confidence standalone intent so those win first.
+  const attrCheck = detectProductAttributeCheck(normalizedText);
+  if (attrCheck) {
+    return {
+      strategy:    'product_attr_check',
+      intent:      'descripcion',
+      entity:      { type: 'product', value: attrCheck.product, askedAttribute: attrCheck.askedAttribute },
+      usedContext: false,
+      reason:      `product attr check: "${attrCheck.product}" ¿tiene "${attrCheck.askedAttribute}"?`,
     };
   }
 
@@ -948,6 +1023,19 @@ function decide(intentResult, entityResult, context, normalizedText) {
  * @returns {Record<string, any>}  Partial update for Redis (or {} for no-op)
  */
 function buildContextUpdate(decision) {
+  // Product attribute check — save the confirmed product entity for follow-up turns
+  if (decision.strategy === 'product_attr_check') {
+    return {
+      lastIntent:          'descripcion',
+      lastEntity:          { type: 'product', value: decision.entity.value },
+      lastEntityFound:     true,
+      paginationCategory:  null,
+      paginationOffset:    null,
+      paginationTotal:     null,
+      availableCategories: null,
+    };
+  }
+
   // AI path: if a product entity was identified in the message, save it so
   // follow-up turns (e.g. "y una con queso") can resolve against the right product.
   // When no entity was found, return {} — existing context is left untouched.
@@ -1107,7 +1195,20 @@ async function queryProductsCompoundAware(entityValue, businessId) {
       }
     } catch { /* fall through */ }
   }
-  const rows = await queryProducts(entityValue, businessId);
+  const rawRows = await queryProducts(entityValue, businessId);
+  if (rawRows.length > 1) {
+    // Re-rank: promote products where the query appears as a whole word in the name.
+    // ILIKE '%mole%' matches both "Mole Poblano" AND "Guacamole", and alphabetical
+    // ordering puts "Guacamole" first. Re-sorting surfaces the word-boundary hit first.
+    const normQ = normalize(entityValue).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wbRe  = new RegExp(`\\b${normQ}\\b`);
+    rawRows.sort((a, b) => {
+      const aWb = wbRe.test(normalize(a.name)) ? 0 : 1;
+      const bWb = wbRe.test(normalize(b.name)) ? 0 : 1;
+      return aWb - bWb;
+    });
+  }
+  const rows = rawRows;
   if (rows.length > 0) return { rows, compound: null, partialMatch: false };
 
   // ── Word-by-word fallback ────────────────────────────────────────────
@@ -1345,18 +1446,87 @@ async function executeDecision(decision, originalText, normalizedText, businessI
     }
   }
 
+  // ── Product attribute inclusion check: "does [product] include/have [attr]?" ─
+  // Looks up the product, checks its description AND key/value attributes for the
+  // specific queried attribute, then replies positively or negatively — always
+  // including the full product description and attributes in the response.
+  if (decision.strategy === 'product_attr_check') {
+    const productName = decision.entity.value;
+    const askedAttr   = decision.entity.askedAttribute;
+    try {
+      const { rows, partialMatch } = await queryProductsCompoundAware(productName, businessId);
+      // Reject word-by-word fallback matches where the returned product doesn't
+      // actually contain all significant words from the query — e.g. searching
+      // "hamburguesa italiana" must not silently return "hamburguesa BBQ".
+      const _ATTR_STOP = new Set(['el','la','los','las','un','una','de','del','con','y','o','en','a','al','por']);
+      const validAttrRows = (partialMatch && rows.length > 0)
+        ? (() => {
+            const qWords = normalize(productName).split(/\s+/).filter((w) => w.length >= 3 && !_ATTR_STOP.has(w));
+            const p0 = rows[0];
+            const haystack = normalize((p0.name ?? '') + ' ' + (p0.description ?? ''));
+            return qWords.every((w) => haystack.includes(w)) ? rows : [];
+          })()
+        : rows;
+      if (validAttrRows.length === 0) {
+        return `No encontré "${productName}" en nuestro catálogo. ¿Quieres ver las opciones disponibles?`;
+      }
+      const p = validAttrRows[0];
+      let attrsMap = {};
+      try {
+        attrsMap = await getProductAttributes([p.id]);
+      } catch { /* attributes are optional */ }
+
+      const normAttr  = normalize(askedAttr);
+      const normDesc  = normalize(p.description ?? '');
+      const attrsList = attrsMap[p.id] ?? [];
+
+      // Check description and product attributes (key and value)
+      const foundInDesc  = normDesc.includes(normAttr);
+      const foundInAttrs = attrsList.some(
+        (a) => normalize(a.value).includes(normAttr) || normalize(a.key).includes(normAttr)
+      );
+      const found = foundInDesc || foundInAttrs;
+
+      // Build product info suffix (description + attributes)
+      const descPart  = p.description ? ` ${p.description}` : '';
+      const attrsPart = attrsList.length > 0
+        ? ` Sus características son: ${attrsList.map((a) => `${a.key}: ${a.value}`).join(', ')}.`
+        : '';
+
+      if (found) {
+        return `😊 Sí, ${p.name} incluye ${askedAttr}.${descPart}${attrsPart}`;
+      } else {
+        return `${p.name} no incluye "${askedAttr}" entre sus ingredientes o características.${descPart}${attrsPart}`;
+      }
+    } catch (err) {
+      console.error('[Pipeline] Error in product attribute check:', err.message);
+    }
+  }
+
   // Description request: intent=descripcion → show product/service description
   if (decision.intent === 'descripcion') {
     if (!decision.entity?.value) {
       return '¡Claro! ¿Sobre qué producto o servicio te gustaría saber más?';
     }
     try {
-      const { rows } = await queryProductsCompoundAware(decision.entity.value, businessId);
-      let response = formatDescripcionResponse(decision.entity.value, rows);
-      if (rows.length > 0) {
+      const { rows, partialMatch } = await queryProductsCompoundAware(decision.entity.value, businessId);
+      // Reject word-by-word fallback matches where the returned product doesn't
+      // contain all significant words from the query — avoids returning "Hamburguesa BBQ"
+      // when the user asked about "hamburguesa italiana" (which doesn't exist).
+      const _DESC_STOP = new Set(['el','la','los','las','un','una','de','del','con','y','o','en','a','al','por']);
+      const descRows = (partialMatch && rows.length > 0)
+        ? (() => {
+            const qWords = normalize(decision.entity.value).split(/\s+/).filter((w) => w.length >= 3 && !_DESC_STOP.has(w));
+            const p0 = rows[0];
+            const haystack = normalize((p0.name ?? '') + ' ' + (p0.description ?? ''));
+            return qWords.every((w) => haystack.includes(w)) ? rows : [];
+          })()
+        : rows;
+      let response = formatDescripcionResponse(decision.entity.value, descRows);
+      if (descRows.length > 0) {
         try {
-          const attrsMap = await getProductAttributes([rows[0].id]);
-          response += formatProductAttributes(attrsMap, rows[0].id);
+          const attrsMap = await getProductAttributes([descRows[0].id]);
+          response += formatProductAttributes(attrsMap, descRows[0].id);
         } catch { /* attributes are optional */ }
         return response;
       }
@@ -1626,6 +1796,11 @@ async function handleAIFallback(originalText, normalizedText, businessId, intent
  * @returns {Promise<{ replyText: string, decision: PipelineDecision, logs: object }>}
  */
 async function processMessage({ text, sessionId, businessId, onToken = null }) {
+  // 0. Raw normalization (before restructureSentence reorders word order) — used
+  //    exclusively to detect product-attribute inclusion questions whose pattern
+  //    is destroyed by the OV→VO reordering in preprocessMessage.
+  const rawNorm = normalize(text);
+
   // 1. Preprocess: normalize + expand abbreviations + correct typos
   const normalizedText = preprocessMessage(text);
 
@@ -1699,6 +1874,25 @@ async function processMessage({ text, sessionId, businessId, onToken = null }) {
 
   // 6. Make decision
   const decision = decide(intentResult, entityResult, context, primaryText);
+
+  // 6.1  Raw-text attribute check override:
+  //      preprocessMessage()'s restructureSentence() transforms
+  //        "la pizza hawaiana incluye jamon?" → "incluye la pizza hawaiana jamon"
+  //      which breaks the regex in decide() Rule 1.6.
+  //      Re-run on rawNorm (just normalize(), no word reordering) so the
+  //      original subject–verb–object order is preserved.
+  if (decision.strategy !== 'product_attr_check') {
+    const rawAttrCheck = detectProductAttributeCheck(rawNorm);
+    if (rawAttrCheck) {
+      Object.assign(decision, {
+        strategy:    'product_attr_check',
+        intent:      'descripcion',
+        entity:      { type: 'product', value: rawAttrCheck.product, askedAttribute: rawAttrCheck.askedAttribute },
+        usedContext: false,
+        reason:      `product attr check (raw): "${rawAttrCheck.product}" ¿tiene "${rawAttrCheck.askedAttribute}"?`,
+      });
+    }
+  }
 
   // If we detected combined attributes, attach them to the decision
   if (entityResult._combinedAttributes) {

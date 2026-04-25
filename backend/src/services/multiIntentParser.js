@@ -55,6 +55,9 @@ const SIGNAL_WORDS = new Set([
   'donde', 'ubicacion', 'direccion', 'llegar', 'llegan', 'mapa',
   // Catalog / search
   'tiene', 'tienen', 'tienes', 'hay', 'venden', 'vende', 'vendes',
+  // "cuenta con" → equivalent to tiene/tienen; only 'cuenta' is needed here since
+  // "con" is too short and common to add alone; hasSignal() checks token by token.
+  'cuenta', 'cuentan', 'cuentas',
   'existe', 'existen', 'disponible', 'disponibles', 'stock',
   'busco', 'buscar', 'quiero', 'necesito', 'catalogo', 'menu', 'lista',
   // Promotions
@@ -140,13 +143,16 @@ const EXISTENCE_VERBS = new Set([
 const _NP_ARTICLES = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas']);
 
 /**
- * Returns true when `segment` contains an existence-query verb.
+ * Returns true when `segment` contains an existence-query verb OR the
+ * two-word phrase "cuenta con" / "cuentan con" (= "has/have").
  * Works for both leading position ("tienen X") and embedded ("de casualidad tienen X").
  * @param {string} segment
  * @returns {boolean}
  */
 function isExistenceQuery(segment) {
-  return segment.split(/\s+/).some((w) => EXISTENCE_VERBS.has(w));
+  if (segment.split(/\s+/).some((w) => EXISTENCE_VERBS.has(w))) return true;
+  // "cuenta con X" / "cuentan con X" — two-word phrase equivalent to tiene/tienen
+  return /\bcuentan?\s+con\b/.test(segment);
 }
 
 /**
@@ -253,12 +259,27 @@ function findSplit(text) {
     const rightHas = hasSignalOrClause(right);
 
     // Implied-existence exception:
-    //   "tienen hamburguesa doble y agua de jamaica?"
+    //   "tienen hamburguesa doble y agua de jamaica?" — multi-word right side
+    //   "tiene pizza hawaiana y michelada?"           — multi-word left noun phrase
     //   Left has an existence verb → the verb is implicit for the right side too.
-    //   Guard: right must be a multi-word noun phrase (≥ 2 meaningful tokens) so
-    //   single-word continuations like "tienen sal y pimienta" are never split.
-    if (leftHas && !rightHas && isExistenceQuery(left) && isMultiWordNounPhrase(right)) {
-      return { left, right, type };
+    //
+    //   Two cases that allow a split:
+    //   A) Right is a multi-word noun phrase (original rule):
+    //      "tienen hamburguesa doble y agua de jamaica" → split ✓
+    //   B) Left noun phrase is multi-word (new rule):
+    //      "tiene pizza hawaiana y michelada" → left noun = ["pizza","hawaiana"] ≥ 2 → split ✓
+    //      "tienen sal y pimienta"            → left noun = ["sal"] = 1            → NOT split ✓
+    //      "tienen agua y limon"              → left noun = ["agua"] = 1           → NOT split ✓
+    //
+    //   Guard: right must always have at least 1 meaningful token (length ≥ 3, not
+    //   an article) so dangling connectors ("tiene X y") are never split.
+    if (leftHas && !rightHas && isExistenceQuery(left)) {
+      const rightMeaningful  = right.split(/\s+/).filter((t) => t.length >= 3 && !_NP_ARTICLES.has(t));
+      const leftNounTokens   = left.split(/\s+/).filter((t) => !EXISTENCE_VERBS.has(t) && !_NP_ARTICLES.has(t) && t.length >= 2);
+      const isMultiWordLeft  = leftNounTokens.length >= 2;
+      if (rightMeaningful.length >= 1 && (isMultiWordNounPhrase(right) || isMultiWordLeft)) {
+        return { left, right, type };
+      }
     }
 
     // For short messages (≤ 7 words) both sides must have signals

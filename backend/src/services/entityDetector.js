@@ -155,6 +155,8 @@ const PRODUCT_TRIGGER_WORDS = new Set([
   'precio', 'precios', 'cuesta', 'cuanto', 'vale', 'cobran', 'costo',
   // Description-query trigger words
   'contiene', 'incluye', 'trae', 'lleva', 'llevan', 'caracteristicas', 'especificaciones', 'descripcion',
+  // "cuenta con X" / "cuentan con X" — existence query equivalent to tiene/tienen
+  'cuenta', 'cuentan',
   // Catalog/menu trigger words
   'catalogo', 'menu', 'lista', 'dame', 'muestrame',
 ]);
@@ -221,6 +223,8 @@ const PRODUCT_QUERY_PATTERNS = [
   // Must appear AFTER all "que X verb" patterns; this is the final fallback.
   /^que\s+(?!(?:vende[nsn]?|tienes?|tienen|hay|ofrece[n]?|maneja[n]?|contiene[n]?|incluye[n]?|es\b|son\b|tipo[s]?\b|precio[s]?\b|horario[s]?\b|servicio[s]?\b|promo(?:cion(?:es)?)?\b)(?:\s|$))(?<entity>[\wñ]+)\s*\??$/,
   /tiene[sn]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
+  // "cuenta con pizza hawaiana" / "cuentan con la michelada" — equivalent to tiene/tienen
+  /cuentan?\s+con\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /hay\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /existe[n]?\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
   /busco\s+(?:un\s+|una\s+|el\s+|la\s+)?(?<entity>[\wñ\s]+?)(?:\?|$)/,
@@ -554,9 +558,11 @@ async function detectEntities(message, businessId, intentResult = { intent: null
   // NOT compound entity="agua" + attribute="limon".
   // Similarly "tienes hamburguesa con queso?" → entity="hamburguesa con queso"
   // (product search), not compound entity="hamburguesa" + attribute="queso".
+  // "cuenta con pizza hawaiana?" / "cuentan con X?" — same guard: the whole
+  // phrase after "cuenta con" is the product name, not a compound entity+attr.
   // Note: "tiene algo con carne de res" is NOT guarded (extractAttribute fires
   // first) and its embedded compound is promoted via the inner-compound check.
-  const skipCompound = /^(?:tiene[sn]?|hay)\s/.test(normalizedText);
+  const skipCompound = /^(?:tiene[sn]?|hay|cuentan?)\s/.test(normalizedText);
   const compoundExtracted = skipCompound ? null : extractCompoundQuery(normalizedText);
   if (compoundExtracted) {
     const attrType = isMaterial(compoundExtracted.attribute) ? 'material' : 'feature';
